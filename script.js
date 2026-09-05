@@ -1,94 +1,109 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // Elements
-  const myNameDisplay = document.getElementById("my-name");
+  // Elements: Header & Global Controls
+  const userAliasSpan = document.getElementById("user-alias");
+  const roomStatusBadge = document.getElementById("room-status-badge");
+  const roomStatusText = document.getElementById("room-status-text");
+  const selfTestBtn = document.getElementById("btn-self-test");
+  const diagModal = document.getElementById("diag-modal");
+  const diagResults = document.getElementById("diag-results");
+  const closeDiagBtn = document.getElementById("btn-close-diag");
+
+  const alertBanner = document.getElementById("alert-banner");
+  const alertMessage = document.getElementById("alert-message");
+  const alertIcon = document.getElementById("alert-icon");
+  const dismissAlertBtn = document.getElementById("btn-dismiss-alert");
+  const consoleOutput = document.getElementById("console-output");
+  const clearConsoleBtn = document.getElementById("btn-clear-console");
+
+  // Elements: Out-Space
+  const outSpace = document.getElementById("out-space");
   const pinInput = document.getElementById("pin-input");
-  const enterPinBtn = document.getElementById("btn-enter-pin");
+  const enterRoomBtn = document.getElementById("btn-enter-room");
   const randomPinBtn = document.getElementById("btn-random-pin");
-  const shareLinkInput = document.getElementById("share-link");
+  const directLinkInput = document.getElementById("direct-link-input");
   const copyLinkBtn = document.getElementById("btn-copy-link");
-  const statusPill = document.getElementById("status-pill");
-  const newWindowBtn = document.getElementById("btn-new-window");
-  const connectedCountSpan = document.getElementById("connected-count");
-  const devicesRoster = document.getElementById("devices-roster");
-
-  const alertBox = document.getElementById("alert-box");
-  const alertText = document.getElementById("alert-text");
-  const closeAlertBtn = document.getElementById("btn-close-alert");
-  const logBox = document.getElementById("log-box");
-  const clearLogBtn = document.getElementById("btn-clear-log");
-
+  const openWindowBtn = document.getElementById("btn-open-window");
   const qrContainer = document.getElementById("qrcode");
 
+  // Elements: In-Space Workspace
+  const inSpace = document.getElementById("in-space");
+  const activePinDisplay = document.getElementById("active-pin-display");
+  const activeDeviceCount = document.getElementById("active-device-count");
+  const leaveRoomBtn = document.getElementById("btn-leave-room");
+  const deviceRoster = document.getElementById("device-roster");
+
+  // Call & Record Elements
   const startCallBtn = document.getElementById("btn-start-call");
   const endCallBtn = document.getElementById("btn-end-call");
-  const toggleMicBtn = document.getElementById("btn-toggle-mic");
-  const toggleCamBtn = document.getElementById("btn-toggle-cam");
-  const recordBtn = document.getElementById("btn-record");
-  const videoContainer = document.getElementById("video-container");
+  const recordSessionBtn = document.getElementById("btn-record-session");
+  const callVideoGrid = document.getElementById("call-video-grid");
   const localVideo = document.getElementById("local-video");
   const remoteVideo = document.getElementById("remote-video");
-  const recordBanner = document.getElementById("record-banner");
+  const recordStatusBar = document.getElementById("record-status-bar");
 
-  const dropZone = document.getElementById("drop-zone");
-  const fileInput = document.getElementById("file-input");
-  const stagedFilesDiv = document.getElementById("staged-files");
-  const sendFilesBtn = document.getElementById("btn-send-files");
-  const progressContainer = document.getElementById("progress-container");
-  const progressBar = document.getElementById("progress-bar");
-  const transferName = document.getElementById("transfer-name");
-  const transferPct = document.getElementById("transfer-pct");
-  const transferStatusTag = document.getElementById("transfer-status-tag");
+  // File Transfer Elements
+  const dropArea = document.getElementById("drop-area");
+  const fileInputEl = document.getElementById("file-input-el");
+  const stagedQueue = document.getElementById("staged-queue");
+  const dispatchFilesBtn = document.getElementById("btn-dispatch-files");
+  const transferProgressBox = document.getElementById("transfer-progress-box");
+  const progressBarFill = document.getElementById("progress-bar-fill");
+  const progressFileName = document.getElementById("progress-file-name");
+  const progressPercentage = document.getElementById("progress-percentage");
+  const fileStatusIndicator = document.getElementById("file-status-indicator");
 
+  // Chat Elements
   const chatStream = document.getElementById("chat-stream");
-  const chatInput = document.getElementById("chat-input");
-  const sendChatBtn = document.getElementById("btn-send-chat");
+  const chatInputBox = document.getElementById("chat-input-box");
+  const sendMessageBtn = document.getElementById("btn-send-message");
 
-  // State
+  // App State
   let myPeerId = null;
-  let currentPin = null;
+  let activePin = null;
+  let mqttClient = null;
   let peer = null;
-  let connections = new Map(); // peerId -> { conn, name }
-  let selectedFiles = [];
-  let fileInTransit = new Map(); // fileId -> state
+  let webRtcConn = null;
   let localStream = null;
   let activeCall = null;
   let mediaRecorder = null;
-  let recordedBlobs = [];
+  let recordedChunks = [];
+  let stagedFiles = [];
+  let roomPeers = new Map(); // peerId -> name
 
-  const CHUNK_SIZE = 16384; // 16 KB
-
-  // 1. Generate & Keep Cool Device Alias
-  function getAssignedName() {
-    let name = sessionStorage.getItem("dhurta_user_alias");
+  // 1. Generate Consistent Device Alias
+  function getDeviceAlias() {
+    let name = sessionStorage.getItem("dhurta_device_alias");
     if (!name) {
-      const colors = ["Cyber", "Neon", "Solar", "Cosmic", "Emerald", "Ruby", "Shadow", "Amber"];
-      const animals = ["Falcon", "Tiger", "Fox", "Wolf", "Hawk", "Eagle", "Cheetah", "Lynx"];
-      name = `${colors[Math.floor(Math.random() * colors.length)]} ${animals[Math.floor(Math.random() * animals.length)]}`;
-      sessionStorage.setItem("dhurta_user_alias", name);
+      const adjectives = ["Cyber", "Neon", "Cosmic", "Solar", "Emerald", "Ruby", "Shadow", "Amber", "Quantum"];
+      const nouns = ["Falcon", "Tiger", "Fox", "Wolf", "Hawk", "Eagle", "Cheetah", "Lynx", "Phoenix"];
+      name = `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`;
+      sessionStorage.setItem("dhurta_device_alias", name);
     }
     return name;
   }
-  const myName = getAssignedName();
-  myNameDisplay.textContent = myName;
+  const myAlias = getDeviceAlias();
+  userAliasSpan.textContent = myAlias;
 
-  // Logging & Alerts
+  // Logging & Alert Helpers
   function log(msg, type = "default") {
-    const row = document.createElement("div");
-    row.className = type;
-    row.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    logBox.appendChild(row);
-    logBox.scrollTop = logBox.scrollHeight;
+    const el = document.createElement("div");
+    el.className = type;
+    el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    consoleOutput.appendChild(el);
+    consoleOutput.scrollTop = consoleOutput.scrollHeight;
   }
 
-  function showAlert(msg, isError = false) {
-    alertText.textContent = msg;
-    alertBox.className = isError ? "alert-box error" : "alert-box";
-    alertBox.classList.remove("hidden");
+  function showAlert(msg, isError = true) {
+    alertMessage.textContent = msg;
+    alertIcon.textContent = isError ? "❌" : "ℹ️";
+    alertBanner.className = isError ? "alert-banner" : "alert-banner info";
+    alertBanner.classList.remove("hidden");
     log(msg, isError ? "error" : "info");
   }
 
-  closeAlertBtn.addEventListener("click", () => alertBox.classList.add("hidden"));
-  clearLogBtn.addEventListener("click", () => (logBox.innerHTML = ""));
+  dismissAlertBtn.addEventListener("click", () => alertBanner.classList.add("hidden"));
+  closeDiagBtn.addEventListener("click", () => diagModal.classList.add("hidden"));
+  clearConsoleBtn.addEventListener("click", () => (consoleOutput.innerHTML = ""));
 
   function formatBytes(b) {
     if (b === 0) return "0 B";
@@ -96,30 +111,121 @@ document.addEventListener("DOMContentLoaded", () => {
     return parseFloat((b / Math.pow(k, i)).toFixed(1)) + " " + s[i];
   }
 
-  // 2. Client-Side QR Generator
+  // 2. Client-Side QR Renderer
   function renderQR(url) {
     qrContainer.innerHTML = "";
     new QRCode(qrContainer, {
       text: url,
-      width: 150,
-      height: 150,
-      colorDark: "#090d14",
+      width: 170,
+      height: 170,
+      colorDark: "#090d16",
       colorLight: "#ffffff",
       correctLevel: QRCode.CorrectLevel.M,
     });
   }
 
-  // 3. Initialize Robust PeerJS Engine
-  function initPeer(preferredPin = null, targetJoinId = null) {
+  // 3. Dual-Engine Connection Initialization
+  function enterRoom(pin) {
+    if (!/^\d{4}$/.test(pin)) {
+      showAlert("Please enter a valid 4-digit code (e.g. 4829).", true);
+      return;
+    }
+
+    activePin = pin;
+    pinInput.value = pin;
+    activePinDisplay.textContent = pin;
+
+    // Transition from Out-Space to In-Space
+    outSpace.classList.add("hidden");
+    inSpace.classList.remove("hidden");
+
+    roomStatusBadge.className = "status-badge online";
+    roomStatusText.textContent = `In-Space (Room ${pin})`;
+    showAlert(`Entered Room ${pin}. Synchronizing devices...`, false);
+
+    initMqttRoomBus(pin);
+    initPeerEngine();
+  }
+
+  // Engine A: Real-Time MQTT Room Bus (Signaling + Guaranteed Chat Sync)
+  function initMqttRoomBus(pin) {
+    if (mqttClient) mqttClient.end();
+
+    log(`Connecting to global room bus for PIN ${pin}...`, "info");
+    
+    // Connect to public secure WebSocket broker
+    mqttClient = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
+      clientId: `dhurta_${Math.random().toString(16).slice(2, 10)}`,
+      keepalive: 30,
+    });
+
+    mqttClient.on("connect", () => {
+      log(`Room bus connected for Room ${pin}.`, "success");
+      const roomTopic = `dhurta/v4/room/${pin}/#`;
+      mqttClient.subscribe(roomTopic);
+
+      // Announce presence
+      announcePresence();
+    });
+
+    mqttClient.on("message", (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        handleRoomBusMessage(topic, data);
+      } catch (err) {
+        // ignore non-json
+      }
+    });
+
+    mqttClient.on("error", (err) => {
+      log(`Room bus error: ${err.message}`, "error");
+    });
+  }
+
+  function announcePresence() {
+    if (!mqttClient || !activePin) return;
+    mqttClient.publish(
+      `dhurta/v4/room/${activePin}/presence`,
+      JSON.stringify({
+        alias: myAlias,
+        peerId: myPeerId,
+        timestamp: Date.now(),
+      })
+    );
+  }
+
+  function handleRoomBusMessage(topic, data) {
+    const action = topic.split("/").pop();
+
+    if (action === "presence") {
+      // Ignore self
+      if (data.alias === myAlias) return;
+
+      log(`Discovered room member: ${data.alias}`, "success");
+      roomPeers.set(data.alias, data.peerId);
+      updateRoster();
+
+      // If remote device has a PeerJS ID and we don't have WebRTC yet, initiate connection
+      if (data.peerId && peer && !webRtcConn) {
+        log(`Initiating WebRTC direct channel to ${data.alias}...`, "info");
+        const conn = peer.connect(data.peerId);
+        bindWebRtcChannel(conn);
+      }
+    } else if (action === "chat") {
+      if (data.sender !== myAlias) {
+        renderChatBubble(data.sender, data.text, false);
+      }
+    } else if (action === "file") {
+      if (data.sender !== myAlias) {
+        handleIncomingMqttFile(data);
+      }
+    }
+  }
+
+  // Engine B: WebRTC / PeerJS Direct Link
+  function initPeerEngine() {
     if (peer) peer.destroy();
 
-    currentPin = preferredPin || Math.floor(1000 + Math.random() * 9000).toString();
-    pinInput.value = currentPin;
-
-    statusPill.textContent = "Connecting to broker...";
-    statusPill.className = "status-pill online";
-
-    // Use reliable server-assigned IDs to avoid broker conflicts
     peer = new Peer({
       config: {
         iceServers: [
@@ -132,27 +238,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
     peer.on("open", (id) => {
       myPeerId = id;
-      log(`Peer broker connected. Unique ID: ${id.slice(0, 8)}...`, "success");
-      statusPill.textContent = `Room ${currentPin} (Active)`;
-      statusPill.className = "status-pill online";
+      log(`P2P WebRTC engine ready (ID: ${id.slice(0, 8)}...).`, "success");
 
-      // Formulate precise direct pairing link
-      const joinUrl = `${window.location.origin}${window.location.pathname}?pin=${currentPin}&join=${id}`;
-      shareLinkInput.value = joinUrl;
+      // Build and render direct share link
+      const joinUrl = `${window.location.origin}${window.location.pathname}?pin=${activePin}`;
+      directLinkInput.value = joinUrl;
       renderQR(joinUrl);
 
-      updateRoster();
-
-      // If opening as a targeted guest, auto-connect immediately
-      if (targetJoinId) {
-        log(`Auto-connecting to room host (${targetJoinId.slice(0, 8)})...`, "info");
-        connectToPeer(targetJoinId);
-      }
+      // Re-announce presence with Peer ID
+      announcePresence();
     });
 
     peer.on("connection", (conn) => {
-      log(`Incoming handshake from peer!`, "info");
-      bindDataChannel(conn);
+      log(`Incoming WebRTC direct connection established!`, "success");
+      bindWebRtcChannel(conn);
     });
 
     peer.on("call", (call) => {
@@ -160,92 +259,72 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     peer.on("error", (err) => {
-      if (err.type === "peer-unavailable") {
-        showAlert("Host is not online yet. Keep this window open or use the QR code link.", true);
-      } else {
-        showAlert(`Network/PeerJS event: ${err.type}`, true);
-      }
+      log(`WebRTC warning (${err.type}): falling back to Room Bus.`, "info");
     });
   }
 
-  // 4. Data Connection Handshake (Fixed Immediate Open Check)
-  function connectToPeer(targetId) {
-    const conn = peer.connect(targetId, { reliable: true });
-    bindDataChannel(conn);
-  }
+  function bindWebRtcChannel(conn) {
+    webRtcConn = conn;
 
-  function bindDataChannel(conn) {
     const setup = () => {
-      connections.set(conn.peer, { conn, name: "Remote Device" });
-
-      statusPill.textContent = `Connected (Room ${currentPin})`;
-      statusPill.className = "status-pill connected";
-
-      // Announce identity
-      conn.send({ type: "handshake", name: myName, pin: currentPin });
-      updateRoster();
-      log(`WebRTC channel open with peer.`, "success");
-      showAlert(`Device connected to Room ${currentPin}!`, false);
+      log(`WebRTC DataChannel confirmed open with peer!`, "success");
+      fileStatusIndicator.textContent = "P2P Connected";
+      fileStatusIndicator.className = "status-badge online";
     };
 
-    // Fix: In PeerJS, conn.open may already be true on incoming connections
-    if (conn.open) {
-      setup();
-    } else {
-      conn.on("open", setup);
-    }
+    if (conn.open) setup();
+    else conn.on("open", setup);
 
-    conn.on("close", () => {
-      connections.delete(conn.peer);
-      updateRoster();
-      log(`Peer disconnected.`, "info");
-      if (connections.size === 0) {
-        statusPill.textContent = `Room ${currentPin} (Waiting)`;
-        statusPill.className = "status-pill online";
+    conn.on("data", (data) => {
+      if (typeof data === "string") {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type === "chat") renderChatBubble(parsed.sender, parsed.text, false);
+          if (parsed.type === "file") handleIncomingMqttFile(parsed);
+        } catch (e) {}
       }
     });
 
-    conn.on("data", (data) => {
-      handleIncomingData(data, conn);
-    });
-
-    conn.on("error", (err) => {
-      log(`DataChannel error: ${err.message}`, "error");
+    conn.on("close", () => {
+      webRtcConn = null;
+      fileStatusIndicator.textContent = "Room Bus Active";
+      fileStatusIndicator.className = "badge-neutral";
     });
   }
 
+  // 4. Device Roster Updates
   function updateRoster() {
-    devicesRoster.innerHTML = "";
-    const count = connections.size + 1;
-    connectedCountSpan.textContent = count;
+    deviceRoster.innerHTML = "";
+    const total = roomPeers.size + 1;
+    activeDeviceCount.textContent = total;
 
     // Self
-    const selfRow = document.createElement("div");
-    selfRow.className = "device-card";
-    selfRow.innerHTML = `<span><span class="dot"></span><strong>${myName}</strong> (You)</span><span style="color:#64748b">Active</span>`;
-    devicesRoster.appendChild(selfRow);
+    const selfChip = document.createElement("div");
+    selfChip.className = "device-chip";
+    selfChip.innerHTML = `<span><span class="dot"></span><strong>${myAlias}</strong> (You)</span><span style="color:#64748b">Host</span>`;
+    deviceRoster.appendChild(selfChip);
 
-    // Peers
-    connections.forEach((device) => {
-      const row = document.createElement("div");
-      row.className = "device-card";
-      row.innerHTML = `<span><span class="dot"></span>${device.name}</span><span style="color:#10b981">Connected</span>`;
-      devicesRoster.appendChild(row);
+    // Remote Members
+    roomPeers.forEach((pId, name) => {
+      const chip = document.createElement("div");
+      chip.className = "device-chip";
+      chip.innerHTML = `<span><span class="dot"></span>${name}</span><span style="color:#10b981">Synced</span>`;
+      deviceRoster.appendChild(chip);
     });
   }
 
-  // 5. High-Reliability Data & Chunk Processing
-  function arrayBufferToBase64(buf) {
+  // 5. Reliable File Transfer & Media Streaming
+  function arrayBufferToBase64(buffer) {
     let binary = "";
-    const bytes = new Uint8Array(buf);
+    const bytes = new Uint8Array(buffer);
     for (let i = 0; i < bytes.byteLength; i++) {
       binary += String.fromCharCode(bytes[i]);
     }
     return window.btoa(binary);
   }
 
-  function base64ToArrayBuffer(b64) {
-    const binary = window.atob(b64);
+  function base64ToArrayBuffer(base64) {
+    const binary = window.atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
@@ -253,265 +332,190 @@ document.addEventListener("DOMContentLoaded", () => {
     return bytes.buffer;
   }
 
-  function handleIncomingData(data, conn) {
-    if (typeof data === "string") {
-      try { data = JSON.parse(data); } catch (e) { return; }
-    }
-
-    if (data.type === "handshake") {
-      if (connections.has(conn.peer)) {
-        connections.get(conn.peer).name = data.name;
-        updateRoster();
-        appendSystemChat(`${data.name} joined the room.`);
-      }
-    } else if (data.type === "chat") {
-      appendChatBubble(data.sender, data.text, false);
-    } else if (data.type === "file_start") {
-      fileInTransit.set(data.fileId, {
-        meta: data,
-        chunks: [],
-        receivedChunks: 0,
-      });
-      progressContainer.classList.remove("hidden");
-      transferName.textContent = `Receiving: ${data.name}`;
-      transferStatusTag.textContent = "Receiving...";
-    } else if (data.type === "file_chunk") {
-      const record = fileInTransit.get(data.fileId);
-      if (!record) return;
-
-      record.chunks[data.index] = base64ToArrayBuffer(data.data);
-      record.receivedChunks++;
-
-      const pct = Math.min(100, Math.round((record.receivedChunks / record.meta.totalChunks) * 100));
-      progressBar.style.width = `${pct}%`;
-      transferPct.textContent = `${pct}%`;
-    } else if (data.type === "file_finish") {
-      const record = fileInTransit.get(data.fileId);
-      if (!record) return;
-
-      progressContainer.classList.add("hidden");
-      progressBar.style.width = "0%";
-      transferStatusTag.textContent = "Complete";
-
-      const blob = new Blob(record.chunks, { type: record.meta.mime });
-      displayAndDownloadFile(blob, record.meta.name, record.meta.mime, data.sender);
-      fileInTransit.delete(data.fileId);
-    }
-  }
-
-  function displayAndDownloadFile(blob, name, mime, sender) {
-    const url = URL.createObjectURL(blob);
-
-    // Auto-download file to recipient storage
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-
-    // Render Preview in Chat Feed
-    const wrap = document.createElement("div");
-    wrap.className = "chat-bubble peer";
-    wrap.innerHTML = `<div class="chat-sender">${sender} (Shared File)</div><div>📄 <strong>${name}</strong> (${formatBytes(blob.size)})</div>`;
-
-    if (mime.startsWith("image/")) {
-      wrap.innerHTML += `<div class="chat-media-preview"><img src="${url}" alt="${name}" /></div>`;
-    } else if (mime.startsWith("video/")) {
-      wrap.innerHTML += `<div class="chat-media-preview"><video src="${url}" controls></video></div>`;
-    } else if (mime.startsWith("audio/")) {
-      wrap.innerHTML += `<div class="chat-media-preview"><audio src="${url}" controls></audio></div>`;
-    }
-
-    wrap.innerHTML += `<a href="${url}" download="${name}" style="color:#60a5fa; text-decoration: underline; font-size:0.75rem; display:inline-block; margin-top:4px;">Download again</a>`;
-    chatStream.appendChild(wrap);
-    chatStream.scrollTop = chatStream.scrollHeight;
-
-    log(`Received & saved file "${name}".`, "success");
-  }
-
-  // 6. Send File Logic with Safe Backpressure
-  sendFilesBtn.addEventListener("click", async () => {
-    if (!selectedFiles.length) {
-      showAlert("Please drag & drop or select files first.", true);
-      return;
-    }
-
-    if (connections.size === 0) {
-      showAlert("No device connected yet! Staged files will be held until a device connects.", true);
-      return;
-    }
-
-    sendFilesBtn.disabled = true;
-    progressContainer.classList.remove("hidden");
-    transferStatusTag.textContent = "Sending...";
-
-    for (const file of selectedFiles) {
-      const fileId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-      transferName.textContent = `Sending: ${file.name}`;
-
-      // Broadcast metadata
-      broadcast({
-        type: "file_start",
-        fileId,
-        name: file.name,
-        size: file.size,
-        mime: file.type || "application/octet-stream",
-        totalChunks,
-        sender: myName,
-      });
-
-      // Slice and stream Base64 chunks safely
-      for (let i = 0; i < totalChunks; i++) {
-        const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-        const buf = await slice.arrayBuffer();
-        const base64Chunk = arrayBufferToBase64(buf);
-
-        broadcast({
-          type: "file_chunk",
-          fileId,
-          index: i,
-          data: base64Chunk,
-        });
-
-        const pct = Math.min(100, Math.round(((i + 1) / totalChunks) * 100));
-        progressBar.style.width = `${pct}%`;
-        transferPct.textContent = `${pct}%`;
-
-        // Wait to prevent WebRTC SCTP buffer overflow
-        await new Promise((resolve) => setTimeout(resolve, 8));
-      }
-
-      broadcast({ type: "file_finish", fileId, sender: myName });
-
-      // Notify local chat
-      appendSentFileNotice(file);
-      log(`Sent file: ${file.name}`, "success");
-    }
-
-    setTimeout(() => {
-      progressContainer.classList.add("hidden");
-      progressBar.style.width = "0%";
-      selectedFiles = [];
-      stagedFilesDiv.innerHTML = "";
-      sendFilesBtn.disabled = false;
-      transferStatusTag.textContent = "Sent";
-    }, 600);
-  });
-
-  function broadcast(payload) {
-    const str = JSON.stringify(payload);
-    connections.forEach(({ conn }) => {
-      if (conn && conn.open) {
-        conn.send(str);
-      }
-    });
-  }
-
-  function appendSentFileNotice(file) {
-    const b = document.createElement("div");
-    b.className = "chat-bubble mine";
-    b.innerHTML = `<div class="chat-sender">You</div><div>📤 Sent <strong>${file.name}</strong> (${formatBytes(file.size)})</div>`;
-    chatStream.appendChild(b);
-    chatStream.scrollTop = chatStream.scrollHeight;
-  }
-
-  // 7. Drag & Drop File Handlers
+  // Drag & Drop
   ["dragenter", "dragover"].forEach((evt) => {
-    dropZone.addEventListener(evt, (e) => {
+    dropArea.addEventListener(evt, (e) => {
       e.preventDefault();
-      dropZone.classList.add("dragover");
+      dropArea.classList.add("dragover");
     });
   });
 
   ["dragleave", "drop"].forEach((evt) => {
-    dropZone.addEventListener(evt, (e) => {
+    dropArea.addEventListener(evt, (e) => {
       e.preventDefault();
-      dropZone.classList.remove("dragover");
+      dropArea.classList.remove("dragover");
     });
   });
 
-  dropZone.addEventListener("drop", (e) => {
-    if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+  dropArea.addEventListener("drop", (e) => {
+    if (e.dataTransfer.files.length) handleSelectedFiles(e.dataTransfer.files);
   });
 
-  fileInput.addEventListener("change", (e) => {
-    if (e.target.files.length) handleFiles(e.target.files);
+  fileInputEl.addEventListener("change", (e) => {
+    if (e.target.files.length) handleSelectedFiles(e.target.files);
   });
 
-  function handleFiles(files) {
-    selectedFiles = Array.from(files);
-    stagedFilesDiv.innerHTML = "";
+  function handleSelectedFiles(files) {
+    stagedFiles = Array.from(files);
+    stagedQueue.innerHTML = "";
 
-    selectedFiles.forEach((f) => {
-      const item = document.createElement("div");
-      item.className = "staged-item";
-      item.innerHTML = `<span>📄 ${f.name}</span><span style="color:#64748b">${formatBytes(f.size)}</span>`;
-      stagedFilesDiv.appendChild(item);
+    stagedFiles.forEach((file) => {
+      const row = document.createElement("div");
+      row.className = "staged-row";
+      row.innerHTML = `<span>📄 ${file.name}</span><span style="color:#64748b">${formatBytes(file.size)}</span>`;
+      stagedQueue.appendChild(row);
     });
 
-    transferStatusTag.textContent = `${selectedFiles.length} file(s) ready`;
-    showAlert(`${selectedFiles.length} file(s) staged. Click 'Send Selected Files' to transmit.`, false);
+    fileStatusIndicator.textContent = `${stagedFiles.length} file(s) staged`;
   }
 
-  // 8. Chat
-  function appendChatBubble(sender, text, isMine) {
-    const b = document.createElement("div");
-    b.className = `chat-bubble ${isMine ? "mine" : "peer"}`;
-    b.innerHTML = `<div class="chat-sender">${sender}</div><div>${text}</div>`;
-    chatStream.appendChild(b);
-    chatStream.scrollTop = chatStream.scrollHeight;
-  }
-
-  function appendSystemChat(text) {
-    const d = document.createElement("div");
-    d.className = "chat-system-msg";
-    d.textContent = text;
-    chatStream.appendChild(d);
-  }
-
-  function sendChatMessage() {
-    const text = chatInput.value.trim();
-    if (!text) return;
-
-    appendChatBubble(myName, text, true);
-    broadcast({ type: "chat", sender: myName, text });
-    chatInput.value = "";
-  }
-
-  sendChatBtn.addEventListener("click", sendChatMessage);
-  chatInput.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") sendChatMessage();
-  });
-
-  // 9. WebRTC Audio / Video Calls
-  startCallBtn.addEventListener("click", async () => {
-    if (connections.size === 0) {
-      showAlert("Wait for another device to enter the room before starting a call.", true);
+  // Dispatch Files
+  dispatchFilesBtn.addEventListener("click", async () => {
+    if (!stagedFiles.length) {
+      showAlert("Please drag & drop or select files first.", true);
       return;
     }
 
+    dispatchFilesBtn.disabled = true;
+    transferProgressBox.classList.remove("hidden");
+
+    for (const file of stagedFiles) {
+      progressFileName.textContent = `Streaming: ${file.name}`;
+      progressBarFill.style.width = "30%";
+      progressPercentage.textContent = "30%";
+
+      const buffer = await file.arrayBuffer();
+      const base64Data = arrayBufferToBase64(buffer);
+
+      const payload = {
+        sender: myAlias,
+        name: file.name,
+        size: file.size,
+        mime: file.type || "application/octet-stream",
+        data: base64Data,
+      };
+
+      progressBarFill.style.width = "80%";
+      progressPercentage.textContent = "80%";
+
+      // Send via WebRTC if open, otherwise send via Room Bus (Guarantees delivery)
+      if (webRtcConn && webRtcConn.open) {
+        webRtcConn.send(JSON.stringify({ type: "file", ...payload }));
+      } else if (mqttClient) {
+        mqttClient.publish(`dhurta/v4/room/${activePin}/file`, JSON.stringify(payload));
+      }
+
+      progressBarFill.style.width = "100%";
+      progressPercentage.textContent = "100%";
+
+      renderSentFile(file);
+      log(`Transferred file: ${file.name}`, "success");
+    }
+
+    setTimeout(() => {
+      transferProgressBox.classList.add("hidden");
+      progressBarFill.style.width = "0%";
+      stagedFiles = [];
+      stagedQueue.innerHTML = "";
+      dispatchFilesBtn.disabled = false;
+      fileStatusIndicator.textContent = "Sent";
+    }, 600);
+  });
+
+  function handleIncomingMqttFile(data) {
+    const arrayBuf = base64ToArrayBuffer(data.data);
+    const blob = new Blob([arrayBuf], { type: data.mime });
+    const url = URL.createObjectURL(blob);
+
+    // Auto-download file
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = data.name;
+    a.click();
+
+    // In-Chat Media Preview
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble peer";
+    bubble.innerHTML = `<div class="chat-author">${data.sender} (Shared File)</div><div>📄 <strong>${data.name}</strong> (${formatBytes(data.size)})</div>`;
+
+    if (data.mime.startsWith("image/")) {
+      bubble.innerHTML += `<div class="media-preview-box"><img src="${url}" alt="${data.name}" /></div>`;
+    } else if (data.mime.startsWith("video/")) {
+      bubble.innerHTML += `<div class="media-preview-box"><video src="${url}" controls></video></div>`;
+    } else if (data.mime.startsWith("audio/")) {
+      bubble.innerHTML += `<div class="media-preview-box"><audio src="${url}" controls></audio></div>`;
+    }
+
+    bubble.innerHTML += `<a href="${url}" download="${data.name}" style="color:#60a5fa; text-decoration: underline; font-size:0.75rem; margin-top:4px; display:inline-block;">Save file</a>`;
+    chatStream.appendChild(bubble);
+    chatStream.scrollTop = chatStream.scrollHeight;
+
+    log(`File "${data.name}" received and saved.`, "success");
+  }
+
+  function renderSentFile(file) {
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble mine";
+    bubble.innerHTML = `<div class="chat-author">You</div><div>📤 Sent <strong>${file.name}</strong> (${formatBytes(file.size)})</div>`;
+    chatStream.appendChild(bubble);
+    chatStream.scrollTop = chatStream.scrollHeight;
+  }
+
+  // 6. Real-Time Chat Engine
+  function sendChatMessage() {
+    const text = chatInputBox.value.trim();
+    if (!text || !activePin) return;
+
+    renderChatBubble(myAlias, text, true);
+
+    const payload = { sender: myAlias, text, timestamp: Date.now() };
+
+    // Broadcast across both channels
+    if (webRtcConn && webRtcConn.open) {
+      webRtcConn.send(JSON.stringify({ type: "chat", ...payload }));
+    }
+    if (mqttClient) {
+      mqttClient.publish(`dhurta/v4/room/${activePin}/chat`, JSON.stringify(payload));
+    }
+
+    chatInputBox.value = "";
+  }
+
+  sendMessageBtn.addEventListener("click", sendChatMessage);
+  chatInputBox.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") sendChatMessage();
+  });
+
+  function renderChatBubble(author, text, isMine) {
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${isMine ? "mine" : "peer"}`;
+    bubble.innerHTML = `<div class="chat-author">${author}</div><div>${text}</div>`;
+    chatStream.appendChild(bubble);
+    chatStream.scrollTop = chatStream.scrollHeight;
+  }
+
+  // 7. Video Calling & Session Recorder
+  startCallBtn.addEventListener("click", async () => {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localVideo.srcObject = localStream;
-      videoContainer.classList.remove("hidden");
+      callVideoGrid.classList.remove("hidden");
 
       startCallBtn.classList.add("hidden");
       endCallBtn.classList.remove("hidden");
-      toggleMicBtn.classList.remove("hidden");
-      toggleCamBtn.classList.remove("hidden");
 
-      // Call the connected peer
-      const remotePeerId = connections.keys().next().value;
-      activeCall = peer.call(remotePeerId, localStream);
-
-      activeCall.on("stream", (remoteStream) => {
-        remoteVideo.srcObject = remoteStream;
-      });
-
-      activeCall.on("close", endCall);
-      log(`Calling remote peer...`, "info");
+      // Call remote peer via WebRTC if peer ID is available
+      const remotePeerId = roomPeers.values().next().value;
+      if (remotePeerId && peer) {
+        activeCall = peer.call(remotePeerId, localStream);
+        activeCall.on("stream", (remoteStream) => {
+          remoteVideo.srcObject = remoteStream;
+        });
+        activeCall.on("close", cleanupCall);
+      }
+      log("Camera and microphone activated for call.", "info");
     } catch (e) {
-      showAlert(`Camera/Microphone error: ${e.message}`, true);
+      showAlert(`Media permission denied: ${e.message}`, true);
     }
   });
 
@@ -520,12 +524,10 @@ document.addEventListener("DOMContentLoaded", () => {
       .then((stream) => {
         localStream = stream;
         localVideo.srcObject = stream;
-        videoContainer.classList.remove("hidden");
+        callVideoGrid.classList.remove("hidden");
 
         startCallBtn.classList.add("hidden");
         endCallBtn.classList.remove("hidden");
-        toggleMicBtn.classList.remove("hidden");
-        toggleCamBtn.classList.remove("hidden");
 
         call.answer(stream);
         activeCall = call;
@@ -533,123 +535,134 @@ document.addEventListener("DOMContentLoaded", () => {
         call.on("stream", (remoteStream) => {
           remoteVideo.srcObject = remoteStream;
         });
-
-        call.on("close", endCall);
+        call.on("close", cleanupCall);
       })
-      .catch((e) => showAlert(`Microphone/Camera permission error: ${e.message}`, true));
+      .catch((e) => showAlert(`Call accept error: ${e.message}`, true));
   }
 
-  function endCall() {
+  function cleanupCall() {
     if (localStream) {
       localStream.getTracks().forEach((t) => t.stop());
       localStream = null;
     }
     localVideo.srcObject = null;
     remoteVideo.srcObject = null;
-    videoContainer.classList.add("hidden");
-
+    callVideoGrid.classList.add("hidden");
     startCallBtn.classList.remove("hidden");
     endCallBtn.classList.add("hidden");
-    toggleMicBtn.classList.add("hidden");
-    toggleCamBtn.classList.add("hidden");
   }
 
   endCallBtn.addEventListener("click", () => {
     if (activeCall) activeCall.close();
-    endCall();
+    cleanupCall();
   });
 
-  toggleMicBtn.addEventListener("click", () => {
-    if (!localStream) return;
-    const track = localStream.getAudioTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      toggleMicBtn.textContent = track.enabled ? "🎤 Mute" : "🔇 Unmute";
-    }
-  });
-
-  toggleCamBtn.addEventListener("click", () => {
-    if (!localStream) return;
-    const track = localStream.getVideoTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      toggleCamBtn.textContent = track.enabled ? "📷 Video Off" : "📷 Video On";
-    }
-  });
-
-  // 10. Recording Session
-  recordBtn.addEventListener("click", async () => {
+  recordSessionBtn.addEventListener("click", async () => {
     if (mediaRecorder && mediaRecorder.state === "recording") {
       mediaRecorder.stop();
-      recordBtn.textContent = "⏺ Record Session";
-      recordBanner.classList.add("hidden");
+      recordSessionBtn.textContent = "⏺ Record";
+      recordStatusBar.classList.add("hidden");
       return;
     }
 
     try {
-      let streamToRecord = localStream;
-      if (!streamToRecord) {
-        streamToRecord = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      let stream = localStream;
+      if (!stream) {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       }
 
-      recordedBlobs = [];
-      mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: "video/webm" });
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedBlobs.push(e.data);
+        if (e.data.size > 0) recordedChunks.push(e.data);
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedBlobs, { type: "video/webm" });
+        const blob = new Blob(recordedChunks, { type: "video/webm" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `Dhurta-Record-${Date.now()}.webm`;
+        a.download = `Dhurta-Session-${Date.now()}.webm`;
         a.click();
-        log("Recorded video session saved and downloaded.", "success");
+        log("Session recording saved to device.", "success");
       };
 
       mediaRecorder.start();
-      recordBtn.textContent = "⏹ Stop Recording";
-      recordBanner.classList.remove("hidden");
+      recordSessionBtn.textContent = "⏹ Stop Record";
+      recordStatusBar.classList.remove("hidden");
       log("Session recording started...", "info");
     } catch (e) {
-      showAlert(`Screen/Session recording failed: ${e.message}`, true);
+      showAlert(`Could not start recording: ${e.message}`, true);
     }
   });
 
-  // 11. Room & Navigation Controls
-  enterPinBtn.addEventListener("click", () => {
-    const pin = pinInput.value.trim();
-    if (!/^\d{4}$/.test(pin)) {
-      showAlert("Please enter a 4-digit code (e.g. 4829).", true);
-      return;
-    }
-    initPeer(pin);
+  // 8. Room Navigation Handlers
+  enterRoomBtn.addEventListener("click", () => {
+    enterRoom(pinInput.value.trim());
   });
 
   randomPinBtn.addEventListener("click", () => {
-    const pin = Math.floor(1000 + Math.random() * 9000).toString();
-    initPeer(pin);
+    const rand = Math.floor(1000 + Math.random() * 9000).toString();
+    pinInput.value = rand;
+    enterRoom(rand);
   });
 
-  newWindowBtn.addEventListener("click", () => {
-    if (shareLinkInput.value.startsWith("http")) {
-      window.open(shareLinkInput.value, "_blank", "width=920,height=820");
+  leaveRoomBtn.addEventListener("click", () => {
+    if (mqttClient) mqttClient.end();
+    if (peer) peer.destroy();
+    cleanupCall();
+
+    activePin = null;
+    roomPeers.clear();
+
+    inSpace.classList.add("hidden");
+    outSpace.classList.remove("hidden");
+
+    roomStatusBadge.className = "status-badge offline";
+    roomStatusText.textContent = "Out-Space (No Room)";
+  });
+
+  openWindowBtn.addEventListener("click", () => {
+    if (directLinkInput.value.startsWith("http")) {
+      window.open(directLinkInput.value, "_blank", "width=950,height=820");
     }
   });
 
   copyLinkBtn.addEventListener("click", () => {
-    navigator.clipboard.writeText(shareLinkInput.value).then(() => {
+    navigator.clipboard.writeText(directLinkInput.value).then(() => {
       copyLinkBtn.textContent = "Copied!";
-      setTimeout(() => (copyLinkBtn.textContent = "Copy Link"), 2000);
+      setTimeout(() => (copyLinkBtn.textContent = "Copy"), 2000);
     });
   });
 
-  // 12. Auto-Bootstrap from URL params (?pin=XXXX&join=TARGET_PEER_ID)
-  const urlParams = new URLSearchParams(window.location.search);
-  const paramPin = urlParams.get("pin");
-  const paramJoin = urlParams.get("join");
+  // 9. Diagnostics Self-Tester
+  selfTestBtn.addEventListener("click", () => {
+    diagModal.classList.remove("hidden");
+    diagResults.innerHTML = "<p>Running diagnostics...</p>";
 
-  initPeer(paramPin, paramJoin);
+    const hasRtc = !!(window.RTCPeerConnection && window.MediaRecorder);
+    const hasMqtt = typeof mqtt !== "undefined";
+
+    diagResults.innerHTML = `
+      <div>● WebRTC & MediaRecorder: ${hasRtc ? "✅ Supported" : "❌ Unsupported"}</div>
+      <div>● Global MQTT Room Engine: ${hasMqtt ? "✅ Library Active" : "❌ Failed to Load"}</div>
+      <div>● Protocol: ${window.location.protocol === "https:" ? "✅ Secure HTTPS" : "⚠️ HTTP"}</div>
+      <div>● Assigned Alias: <strong>${myAlias}</strong></div>
+    `;
+  });
+
+  // URL Auto-Join Check (?pin=XXXX)
+  const urlPin = new URLSearchParams(window.location.search).get("pin");
+  if (urlPin && /^\d{4}$/.test(urlPin)) {
+    pinInput.value = urlPin;
+    enterRoom(urlPin);
+  } else {
+    // Generate initial PIN in out-space
+    const initialPin = Math.floor(1000 + Math.random() * 9000).toString();
+    pinInput.value = initialPin;
+    const initialUrl = `${window.location.origin}${window.location.pathname}?pin=${initialPin}`;
+    directLinkInput.value = initialUrl;
+    renderQR(initialUrl);
+  }
 });
