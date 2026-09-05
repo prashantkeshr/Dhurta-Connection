@@ -3,68 +3,83 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dhurta Connection | Fast P2P Share</title>
-  
-  <!-- PeerJS & QRCode.js libraries (Reliable HTTPS CDNs) -->
+  <title>Dhurta Connection | 4-Digit Room P2P</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="app-container">
+    <!-- Header -->
     <header class="header">
       <div class="logo">⚡ Dhurta <span>Connection</span></div>
-      <div id="status-pill" class="status-pill offline">Initializing...</div>
+      <div class="header-actions">
+        <button id="btn-self-test" class="btn secondary sm">🧪 Run Diagnostic Test</button>
+        <div id="status-pill" class="status-pill offline">No Room Joined</div>
+      </div>
     </header>
 
-    <main class="grid">
-      <!-- Left Panel: Connection & QR -->
-      <section class="card connection-card">
-        <h2>Device Pairing</h2>
-        <p class="subtitle">Scan the QR code on your second device or send the join link.</p>
+    <!-- On-screen Alert & Diagnostics Banner -->
+    <div id="error-banner" class="alert-banner hidden">
+      <span id="error-message"></span>
+      <button id="btn-close-error" class="close-btn">&times;</button>
+    </div>
 
-        <!-- QR Code Wrapper (Always renders reliably) -->
-        <div class="qr-wrapper">
-          <div id="qrcode"></div>
-          <div id="qr-loading" class="spinner"></div>
+    <!-- Diagnostic Modal / Drawer -->
+    <div id="diag-panel" class="diag-panel hidden">
+      <h3>System & WebRTC Diagnostics</h3>
+      <ul id="diag-list"></ul>
+      <button id="btn-close-diag" class="btn secondary sm">Close</button>
+    </div>
+
+    <main class="grid">
+      <!-- Left Panel: 4-Digit Room & Pairing -->
+      <section class="card">
+        <h2>4-Digit Room Code</h2>
+        <p class="subtitle">Enter any 4-digit code to connect both devices.</p>
+
+        <!-- 4-Digit PIN Input Form -->
+        <div class="pin-container">
+          <input type="text" id="pin-input" maxlength="4" placeholder="4829" pattern="[0-9]{4}" />
+          <button id="btn-join-pin" class="btn primary">Enter Room</button>
+          <button id="btn-random-pin" class="btn secondary">Random PIN</button>
         </div>
 
-        <div class="pair-details">
-          <label>Pairing Link:</label>
-          <div class="copy-box">
-            <input type="text" id="share-link" readonly value="Generating..." />
-            <button id="btn-copy" class="btn secondary">Copy</button>
-          </div>
+        <div id="current-room-tag" class="room-tag hidden">
+          Active Room: <strong id="active-pin-display">----</strong>
+        </div>
 
-          <div class="manual-join">
-            <span>Or enter Room ID to connect:</span>
-            <div class="join-input-group">
-              <input type="text" id="target-peer-id" placeholder="Paste Remote ID..." />
-              <button id="btn-connect" class="btn primary">Connect</button>
-            </div>
-          </div>
+        <!-- QR Code -->
+        <div class="qr-wrapper">
+          <div id="qrcode"></div>
+          <div id="qr-placeholder" class="qr-placeholder">Enter or generate a 4-digit PIN to show QR</div>
+        </div>
+
+        <div class="copy-box">
+          <input type="text" id="share-link" readonly value="Waiting for room..." />
+          <button id="btn-copy" class="btn secondary">Copy</button>
         </div>
       </section>
 
       <!-- Right Panel: Drag & Drop and File Transfer -->
-      <section class="card transfer-card">
+      <section class="card">
         <h2>File Transfer</h2>
-        <p class="subtitle">Select or drop files to send them directly over WebRTC.</p>
+        <p class="subtitle">Drag & drop files to send them to the connected room device.</p>
 
-        <!-- Drag & Drop Zone -->
+        <!-- Drop Zone -->
         <div id="drop-zone" class="drop-zone">
           <input type="file" id="file-input" multiple />
           <div class="drop-content">
-            <div class="drop-icon">📁</div>
+            <div class="drop-icon">📂</div>
             <p><strong>Drag & Drop files here</strong> or <span class="browse-link">browse</span></p>
-            <span class="file-limits">Supports all file types (P2P direct stream)</span>
+            <span class="file-limits">P2P Direct Encrypted Stream</span>
           </div>
         </div>
 
-        <!-- Selected Files List -->
+        <!-- File queue -->
         <div id="file-list" class="file-list"></div>
 
-        <!-- Transfer Progress -->
+        <!-- Progress -->
         <div id="progress-container" class="progress-container hidden">
           <div class="progress-labels">
             <span id="transfer-filename">Transferring...</span>
@@ -75,20 +90,23 @@
           </div>
         </div>
 
-        <!-- Actions -->
-        <div class="actions">
-          <button id="btn-send" class="btn primary full-width" disabled>Send Files</button>
-        </div>
+        <button id="btn-send" class="btn primary full-width" disabled>Send Files</button>
 
         <!-- Received Files Feed -->
         <div class="received-feed">
           <h3>Received Files</h3>
           <div id="received-list" class="received-list">
-            <p class="empty-state">No files received yet in this session.</p>
+            <p class="empty-state">No files received yet in this room.</p>
           </div>
         </div>
       </section>
     </main>
+
+    <!-- Live Event Log -->
+    <footer class="footer-log">
+      <h4>System Activity Log</h4>
+      <div id="log-output" class="log-output"></div>
+    </footer>
   </div>
 
   <script src="script.js"></script>
