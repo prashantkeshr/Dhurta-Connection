@@ -3,157 +3,159 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dhurta Connection | Complete Room Workspace</title>
+  <title>Dhurta Connection | Real-Time Sync Workspace</title>
+  
+  <!-- CDNs for PeerJS and QR Code -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="app-container">
-    <!-- Top Bar -->
+    <!-- Top Header -->
     <header class="top-bar">
       <div class="brand">⚡ Dhurta <span>Connection</span></div>
+      
       <div class="user-badge">
-        <span class="user-icon">👤</span>
-        <span id="my-assigned-name">Identifying...</span>
+        <span>👤</span>
+        <strong id="my-name">Identifying...</strong>
       </div>
+
       <div class="top-actions">
-        <button id="btn-self-test" class="btn sm secondary">🧪 Test Engine</button>
-        <button id="btn-open-new-window" class="btn sm secondary">🗗 Open in New Window</button>
-        <div id="status-pill" class="status-pill offline">No Room Joined</div>
+        <button id="btn-new-window" class="btn sm secondary">🗗 Open in New Window</button>
+        <div id="status-pill" class="status-pill offline">Initializing...</div>
       </div>
     </header>
 
-    <!-- On-screen Error & Info Banner -->
-    <div id="alert-banner" class="alert-banner hidden">
-      <span id="alert-message"></span>
-      <button id="btn-close-alert" class="close-btn">&times;</button>
+    <!-- Visual Alert / Notification Bar -->
+    <div id="alert-box" class="alert-box hidden">
+      <span id="alert-text"></span>
+      <button id="btn-close-alert" class="btn-close">&times;</button>
     </div>
 
-    <!-- Diagnostic Panel -->
-    <div id="diag-panel" class="diag-panel hidden">
-      <div class="diag-header">
-        <h4>System & Connection Diagnostics</h4>
-        <button id="btn-close-diag" class="close-btn">&times;</button>
-      </div>
-      <ul id="diag-list"></ul>
-    </div>
-
-    <!-- Setup / Room Selection Bar -->
-    <section class="room-selector card">
-      <div class="room-controls">
-        <label>4-Digit Room:</label>
+    <!-- Room Control Bar -->
+    <section class="card room-bar">
+      <div class="room-pin-group">
+        <label for="pin-input">4-Digit Room Code:</label>
         <input type="text" id="pin-input" maxlength="4" placeholder="4829" />
-        <button id="btn-join-room" class="btn primary">Enter Room</button>
-        <button id="btn-random-room" class="btn secondary">Random PIN</button>
+        <button id="btn-enter-pin" class="btn primary">Enter Room</button>
+        <button id="btn-random-pin" class="btn secondary">Random PIN</button>
       </div>
-      <div class="room-share">
-        <span>Room Link:</span>
-        <input type="text" id="share-link" readonly value="Enter PIN to generate link" />
-        <button id="btn-copy-link" class="btn secondary sm">Copy</button>
+
+      <div class="room-link-group">
+        <span>Share Link:</span>
+        <input type="text" id="share-link" readonly value="Generating..." />
+        <button id="btn-copy-link" class="btn secondary sm">Copy Link</button>
       </div>
     </section>
 
     <!-- Main Workspace Grid -->
-    <main class="workspace-grid">
+    <main class="grid-workspace">
       <!-- Left Column: Devices & Pairing QR -->
-      <aside class="left-col">
-        <!-- Connected Devices Card -->
-        <div class="card devices-card">
+      <aside class="sidebar">
+        <!-- Connected Devices Roster -->
+        <div class="card">
           <div class="card-header">
-            <h3>Connected Devices (<span id="device-count">0</span>)</h3>
+            <h3>Connected Devices (<span id="connected-count">1</span>)</h3>
           </div>
-          <div id="device-list" class="device-list">
-            <p class="empty-state">No devices in room yet.</p>
+          <div id="devices-roster" class="devices-roster">
+            <!-- Populated dynamically -->
           </div>
         </div>
 
-        <!-- QR Code Card -->
+        <!-- QR Code Pairing -->
         <div class="card qr-card">
-          <h3>Scan to Join Room</h3>
-          <div class="qr-box">
+          <h3>Scan to Connect Instantly</h3>
+          <p class="qr-desc">Scan with mobile camera to join this exact room session.</p>
+          <div class="qr-wrapper">
             <div id="qrcode"></div>
-            <p id="qr-hint" class="qr-hint">Enter room code to display QR</p>
           </div>
         </div>
       </aside>
 
-      <!-- Center & Right Column: Media, Call, Files & Chat -->
-      <section class="main-content">
-        <!-- Call & Recording Section -->
+      <!-- Center / Right Column: Calling, Files, and Chat -->
+      <section class="workspace-main">
+        <!-- Call & Recording Box -->
         <div class="card call-card">
           <div class="card-header">
-            <h3>Audio & Video Call</h3>
-            <div class="call-actions">
+            <h3>Audio / Video Call & Recording</h3>
+            <div class="call-controls">
               <button id="btn-start-call" class="btn primary sm">📞 Start Call</button>
               <button id="btn-end-call" class="btn danger sm hidden">End Call</button>
               <button id="btn-toggle-mic" class="btn secondary sm hidden">🎤 Mute</button>
               <button id="btn-toggle-cam" class="btn secondary sm hidden">📷 Video Off</button>
-              <button id="btn-record-call" class="btn warning sm">⏺ Record Session</button>
+              <button id="btn-record" class="btn warning sm">⏺ Record Session</button>
             </div>
           </div>
 
-          <!-- Video Feeds -->
           <div id="video-container" class="video-container hidden">
-            <div class="video-wrapper">
+            <div class="video-box">
               <span class="video-label">Local (You)</span>
               <video id="local-video" autoplay playsinline muted></video>
             </div>
-            <div class="video-wrapper">
-              <span class="video-label">Remote Peer</span>
+            <div class="video-box">
+              <span class="video-label" id="remote-label">Remote Peer</span>
               <video id="remote-video" autoplay playsinline></video>
             </div>
           </div>
-          <div id="record-indicator" class="record-indicator hidden">● Recording in progress... (click 'Stop Recording' to download)</div>
+          <div id="record-banner" class="record-banner hidden">● Recording session... Click "Stop Recording" to download.</div>
         </div>
 
-        <!-- File Transfer Card (Drag & Drop) -->
-        <div class="card files-card">
-          <h3>File Sharing (All Media Supported)</h3>
+        <!-- File Transfer (Drag & Drop) -->
+        <div class="card file-card">
+          <div class="card-header">
+            <h3>File Transfer (All Media Supported)</h3>
+            <span id="transfer-status-tag" class="status-tag">Ready</span>
+          </div>
+
           <div id="drop-zone" class="drop-zone">
             <input type="file" id="file-input" multiple />
-            <div class="drop-text">
-              <span class="icon">📁</span>
+            <div class="drop-content">
+              <div class="drop-icon">📁</div>
               <p><strong>Drag & drop files here</strong> or <span class="highlight">browse</span></p>
-              <span class="sub">Images, Videos, Audios, Docs — Sent via Encrypted Direct P2P</span>
+              <span class="drop-note">Encrypted P2P stream: Photos, Videos, Documents, Archives</span>
             </div>
           </div>
 
-          <!-- Staged file list -->
-          <div id="selected-files-list" class="file-badges"></div>
+          <!-- Staged files -->
+          <div id="staged-files" class="staged-files"></div>
 
-          <!-- Progress bar -->
-          <div id="progress-wrapper" class="progress-wrapper hidden">
-            <div class="progress-info">
-              <span id="transfer-file-title">Sending...</span>
-              <span id="transfer-file-percent">0%</span>
+          <!-- Progress Bar -->
+          <div id="progress-container" class="progress-container hidden">
+            <div class="progress-labels">
+              <span id="transfer-name">Transferring...</span>
+              <span id="transfer-pct">0%</span>
             </div>
             <div class="progress-track">
               <div id="progress-bar" class="progress-bar"></div>
             </div>
           </div>
 
-          <button id="btn-send-files" class="btn primary full-width" disabled>Send Selected Files</button>
+          <!-- Send Button (Always active when files exist) -->
+          <button id="btn-send-files" class="btn primary full-width">Send Selected Files</button>
         </div>
 
-        <!-- Chat & Received Media Section -->
+        <!-- Chat & Real-Time Media Feed -->
         <div class="card chat-card">
-          <h3>Room Chat & Shared Media</h3>
-          <div id="chat-messages" class="chat-messages">
-            <div class="chat-system">Welcome to Dhurta Connection. Messages & files will appear here.</div>
+          <h3>Room Chat & Shared Files</h3>
+          <div id="chat-stream" class="chat-stream">
+            <div class="chat-system-msg">Room initialized. When devices join, you can chat and stream files instantly.</div>
           </div>
-          <div class="chat-input-bar">
-            <input type="text" id="chat-text" placeholder="Type a message and press Enter..." />
+          <div class="chat-bar">
+            <input type="text" id="chat-input" placeholder="Type a message and press Enter..." />
             <button id="btn-send-chat" class="btn primary">Send</button>
           </div>
         </div>
       </section>
     </main>
 
-    <!-- Activity Log Footer -->
-    <footer class="system-log">
-      <h4>System Logs:</h4>
-      <div id="log-console" class="log-console"></div>
+    <!-- Activity Debug Log -->
+    <footer class="system-log card">
+      <div class="log-header">
+        <h4>System Activity Log</h4>
+        <button id="btn-clear-log" class="btn sm secondary">Clear</button>
+      </div>
+      <div id="log-box" class="log-box"></div>
     </footer>
   </div>
 
