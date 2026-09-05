@@ -1,68 +1,100 @@
 document.addEventListener("DOMContentLoaded", () => {
   // Elements
+  const myNameDisplay = document.getElementById("my-assigned-name");
   const pinInput = document.getElementById("pin-input");
-  const joinPinBtn = document.getElementById("btn-join-pin");
-  const randomPinBtn = document.getElementById("btn-random-pin");
-  const currentRoomTag = document.getElementById("current-room-tag");
-  const activePinDisplay = document.getElementById("active-pin-display");
-
-  const qrContainer = document.getElementById("qrcode");
-  const qrPlaceholder = document.getElementById("qr-placeholder");
+  const joinRoomBtn = document.getElementById("btn-join-room");
+  const randomRoomBtn = document.getElementById("btn-random-room");
   const shareLinkInput = document.getElementById("share-link");
-  const copyBtn = document.getElementById("btn-copy");
+  const copyLinkBtn = document.getElementById("btn-copy-link");
   const statusPill = document.getElementById("status-pill");
+  const openNewWindowBtn = document.getElementById("btn-open-new-window");
+  const deviceCountSpan = document.getElementById("device-count");
+  const deviceList = document.getElementById("device-list");
 
-  const errorBanner = document.getElementById("error-banner");
-  const errorMessage = document.getElementById("error-message");
-  const closeErrorBtn = document.getElementById("btn-close-error");
-
+  // Alert & Diagnostic Elements
+  const alertBanner = document.getElementById("alert-banner");
+  const alertMessage = document.getElementById("alert-message");
+  const closeAlertBtn = document.getElementById("btn-close-alert");
   const selfTestBtn = document.getElementById("btn-self-test");
   const diagPanel = document.getElementById("diag-panel");
   const diagList = document.getElementById("diag-list");
   const closeDiagBtn = document.getElementById("btn-close-diag");
-  const logOutput = document.getElementById("log-output");
+  const logConsole = document.getElementById("log-console");
 
+  // QR Elements
+  const qrContainer = document.getElementById("qrcode");
+  const qrHint = document.getElementById("qr-hint");
+
+  // Call & Record Elements
+  const startCallBtn = document.getElementById("btn-start-call");
+  const endCallBtn = document.getElementById("btn-end-call");
+  const toggleMicBtn = document.getElementById("btn-toggle-mic");
+  const toggleCamBtn = document.getElementById("btn-toggle-cam");
+  const recordCallBtn = document.getElementById("btn-record-call");
+  const videoContainer = document.getElementById("video-container");
+  const localVideo = document.getElementById("local-video");
+  const remoteVideo = document.getElementById("remote-video");
+  const recordIndicator = document.getElementById("record-indicator");
+
+  // File Transfer Elements
   const dropZone = document.getElementById("drop-zone");
   const fileInput = document.getElementById("file-input");
-  const fileList = document.getElementById("file-list");
-  const sendBtn = document.getElementById("btn-send");
-  const progressContainer = document.getElementById("progress-container");
-  const progressFill = document.getElementById("progress-fill");
-  const transferFilename = document.getElementById("transfer-filename");
-  const transferPercent = document.getElementById("transfer-percent");
-  const receivedList = document.getElementById("received-list");
+  const selectedFilesList = document.getElementById("selected-files-list");
+  const sendFilesBtn = document.getElementById("btn-send-files");
+  const progressWrapper = document.getElementById("progress-wrapper");
+  const progressBar = document.getElementById("progress-bar");
+  const transferFileTitle = document.getElementById("transfer-file-title");
+  const transferFilePercent = document.getElementById("transfer-file-percent");
 
+  // Chat Elements
+  const chatMessages = document.getElementById("chat-messages");
+  const chatText = document.getElementById("chat-text");
+  const sendChatBtn = document.getElementById("btn-send-chat");
+
+  // State
   let peer = null;
-  let activeConn = null;
-  let selectedFiles = [];
+  let activeConnections = new Map(); // peerId -> DataConnection
+  let currentCall = null;
+  let localStream = null;
+  let mediaRecorder = null;
+  let recordedChunks = [];
   let currentPin = null;
-  const CHUNK_SIZE = 16 * 1024; // 16KB
+  let selectedFiles = [];
+  let receivingFiles = new Map(); // fileId -> state
+  const CHUNK_SIZE = 16384; // 16 KB
 
-  // Log Helper & On-screen Alerts
+  // 1. Generate & Persist Assigned Name
+  function getAssignedName() {
+    let storedName = sessionStorage.getItem("dhurta_assigned_name");
+    if (!storedName) {
+      const adjectives = ["Neon", "Cyber", "Cosmic", "Solar", "Amber", "Ruby", "Shadow", "Emerald", "Frost", "Golden"];
+      const animals = ["Falcon", "Fox", "Tiger", "Hawk", "Wolf", "Lynx", "Eagle", "Dolphin", "Panda", "Cheetah"];
+      storedName = `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${animals[Math.floor(Math.random() * animals.length)]}`;
+      sessionStorage.setItem("dhurta_assigned_name", storedName);
+    }
+    return storedName;
+  }
+  const myName = getAssignedName();
+  myNameDisplay.textContent = myName;
+
+  // Logging & Alerts
   function log(msg, type = "default") {
     const time = new Date().toLocaleTimeString();
     const line = document.createElement("div");
     line.className = `log-line ${type}`;
     line.textContent = `[${time}] ${msg}`;
-    logOutput.appendChild(line);
-    logOutput.scrollTop = logOutput.scrollHeight;
+    logConsole.appendChild(line);
+    logConsole.scrollTop = logConsole.scrollHeight;
   }
 
-  function showError(msg) {
-    errorMessage.textContent = msg;
-    errorBanner.className = "alert-banner";
-    errorBanner.classList.remove("hidden");
-    log(`ERROR: ${msg}`, "error");
+  function showAlert(msg, isError = true) {
+    alertMessage.textContent = msg;
+    alertBanner.className = isError ? "alert-banner" : "alert-banner info";
+    alertBanner.classList.remove("hidden");
+    log(msg, isError ? "error" : "info");
   }
 
-  function showInfo(msg) {
-    errorMessage.textContent = msg;
-    errorBanner.className = "alert-banner info";
-    errorBanner.classList.remove("hidden");
-    log(msg, "info");
-  }
-
-  closeErrorBtn.addEventListener("click", () => errorBanner.classList.add("hidden"));
+  closeAlertBtn.addEventListener("click", () => alertBanner.classList.add("hidden"));
   closeDiagBtn.addEventListener("click", () => diagPanel.classList.add("hidden"));
 
   function formatBytes(bytes) {
@@ -73,45 +105,42 @@ document.addEventListener("DOMContentLoaded", () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   }
 
-  // QR Code Renderer
+  // 2. Client-Side QR Generator
   function renderQR(url) {
-    qrPlaceholder.style.display = "none";
+    qrHint.style.display = "none";
     qrContainer.innerHTML = "";
     new QRCode(qrContainer, {
       text: url,
-      width: 180,
-      height: 180,
-      colorDark: "#0d1117",
+      width: 150,
+      height: 150,
+      colorDark: "#090d13",
       colorLight: "#ffffff",
       correctLevel: QRCode.CorrectLevel.M,
     });
   }
 
-  // --- 4-Digit Room Manager ---
+  // 3. 4-Digit Room Orchestration
   function enterRoom(pin) {
     if (!/^\d{4}$/.test(pin)) {
-      showError("Please enter a valid 4-digit number (e.g. 4829).");
+      showAlert("Please enter a valid 4-digit number (e.g. 4829).");
       return;
     }
 
     currentPin = pin;
-    activePinDisplay.textContent = pin;
-    currentRoomTag.classList.remove("hidden");
+    pinInput.value = pin;
+    const currentUrl = `${window.location.origin}${window.location.pathname}?pin=${pin}`;
+    shareLinkInput.value = currentUrl;
+    renderQR(currentUrl);
 
-    const hostPeerId = `dhurta-room-${pin}`;
-    const joinUrl = `${window.location.origin}${window.location.pathname}?pin=${pin}`;
-    shareLinkInput.value = joinUrl;
-    renderQR(joinUrl);
+    if (peer) peer.destroy();
 
-    if (peer) {
-      peer.destroy();
-    }
-
-    log(`Attempting to claim or join Room #${pin}...`, "info");
-    statusPill.textContent = "Connecting...";
+    statusPill.textContent = `Entering Room ${pin}...`;
     statusPill.className = "status-pill online";
+    log(`Connecting to 4-Digit Room: ${pin}`, "info");
 
-    // Attempt 1: Try to claim the room as the primary host
+    const hostPeerId = `dhurta-v3-room-${pin}`;
+
+    // Attempt to register as room host
     peer = new Peer(hostPeerId, {
       config: {
         iceServers: [
@@ -121,274 +150,538 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     });
 
-    peer.on("open", (id) => {
-      log(`Room ${pin} created! Waiting for device 2 to enter PIN...`, "success");
-      statusPill.textContent = `Room ${pin} Ready`;
+    peer.on("open", () => {
+      log(`Room ${pin} created! You are the Host.`, "success");
+      statusPill.textContent = `Room ${pin} (Host)`;
       statusPill.className = "status-pill online";
+      updateDeviceRoster();
     });
 
     peer.on("connection", (conn) => {
-      log(`Incoming connection established in room ${pin}!`, "success");
-      setupDataConnection(conn);
+      setupDataChannel(conn);
+    });
+
+    peer.on("call", (call) => {
+      handleIncomingCall(call);
     });
 
     peer.on("error", (err) => {
-      // Room already exists: join as a guest peer!
       if (err.type === "unavailable-id") {
-        log(`Room ${pin} already exists on another device. Joining as guest...`, "info");
+        // Room host exists; connect as a guest!
+        log(`Room ${pin} exists on another device. Joining as Guest...`, "info");
         joinAsGuest(hostPeerId);
       } else {
-        showError(`Signaling error: ${err.message || err.type}`);
+        showAlert(`PeerJS Error: ${err.type}`);
       }
     });
   }
 
-  function joinAsGuest(targetHostId) {
+  function joinAsGuest(hostPeerId) {
     if (peer) peer.destroy();
 
-    // Create random guest peer and connect to the room host
-    peer = new Peer();
-    peer.on("open", (guestId) => {
-      log(`Guest initiated. Connecting to Room Host (${targetHostId})...`, "info");
-      const conn = peer.connect(targetHostId);
-      setupDataConnection(conn);
+    peer = new Peer({
+      config: {
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      },
+    });
+
+    peer.on("open", () => {
+      log(`Guest online. Connecting to Room Host...`, "info");
+      const conn = peer.connect(hostPeerId);
+      setupDataChannel(conn);
+    });
+
+    peer.on("call", (call) => {
+      handleIncomingCall(call);
     });
 
     peer.on("error", (err) => {
-      showError(`Guest connection failed: ${err.message || err.type}`);
+      showAlert(`Guest connection error: ${err.type}`);
     });
   }
 
-  function setupDataConnection(conn) {
-    activeConn = conn;
-
+  // 4. Data Channel & Mesh Setup
+  function setupDataChannel(conn) {
     conn.on("open", () => {
+      activeConnections.set(conn.peer, { conn, name: "Remote Device" });
+
       statusPill.textContent = `Connected (Room ${currentPin})`;
       statusPill.className = "status-pill connected";
-      showInfo(`Devices paired successfully in Room ${currentPin}!`);
-      if (selectedFiles.length > 0) sendBtn.disabled = false;
+
+      // Handshake: exchange assigned names
+      conn.send({ type: "name_announcement", name: myName });
+
+      if (selectedFiles.length > 0) sendFilesBtn.disabled = false;
+      updateDeviceRoster();
     });
 
     conn.on("close", () => {
-      statusPill.textContent = `Room ${currentPin} (Waiting)`;
-      statusPill.className = "status-pill online";
-      showError("Peer disconnected from the room.");
-      sendBtn.disabled = true;
-      activeConn = null;
+      activeConnections.delete(conn.peer);
+      log(`Device disconnected.`, "info");
+      updateDeviceRoster();
+
+      if (activeConnections.size === 0) {
+        statusPill.textContent = `Room ${currentPin} (Waiting)`;
+        statusPill.className = "status-pill online";
+        sendFilesBtn.disabled = true;
+      }
     });
 
-    // Chunk Receiver
-    let incomingFile = { meta: null, chunks: [], receivedBytes: 0 };
-
-    conn.on("data", (data) => {
-      if (data.type === "meta") {
-        incomingFile = { meta: data.meta, chunks: [], receivedBytes: 0 };
-        progressContainer.classList.remove("hidden");
-        transferFilename.textContent = `Receiving: ${data.meta.name}`;
-      } else if (data.type === "chunk") {
-        incomingFile.chunks.push(data.chunk);
-        incomingFile.receivedBytes += data.chunk.byteLength || data.chunk.size || CHUNK_SIZE;
-
-        const percent = Math.min(100, Math.round((incomingFile.receivedBytes / incomingFile.meta.size) * 100));
-        progressFill.style.width = `${percent}%`;
-        transferPercent.textContent = `${percent}%`;
-      } else if (data.type === "done") {
-        progressContainer.classList.add("hidden");
-        progressFill.style.width = "0%";
-
-        const blob = new Blob(incomingFile.chunks, { type: incomingFile.meta.type });
-        renderDownloadedFile(blob, incomingFile.meta.name, incomingFile.meta.size);
-      }
+    conn.on("data", (payload) => {
+      handleIncomingData(payload, conn);
     });
   }
 
-  function renderDownloadedFile(blob, name, size) {
+  function updateDeviceRoster() {
+    deviceList.innerHTML = "";
+    const totalDevices = activeConnections.size + 1; // peers + self
+    deviceCountSpan.textContent = totalDevices;
+
+    // Self item
+    const selfEl = document.createElement("div");
+    selfEl.className = "device-item";
+    selfEl.innerHTML = `<span><span class="indicator"></span><strong>${myName}</strong> (You)</span><span style="color:#64748b">Host/Self</span>`;
+    deviceList.appendChild(selfEl);
+
+    // Remote peers
+    activeConnections.forEach((info) => {
+      const el = document.createElement("div");
+      el.className = "device-item";
+      el.innerHTML = `<span><span class="indicator"></span>${info.name}</span><span style="color:#10b981">Active</span>`;
+      deviceList.appendChild(el);
+    });
+  }
+
+  // 5. High-Reliability File Transfer & Media Handling
+  function arrayBufferToBase64(buffer) {
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+
+  function base64ToArrayBuffer(base64) {
+    const binary = window.atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  // Incoming Data Dispatcher
+  function handleIncomingData(data, conn) {
+    if (typeof data === "string") {
+      try { data = JSON.parse(data); } catch (e) { return; }
+    }
+
+    if (data.type === "name_announcement") {
+      if (activeConnections.has(conn.peer)) {
+        activeConnections.get(conn.peer).name = data.name;
+        updateDeviceRoster();
+        appendSystemMessage(`${data.name} joined the room.`);
+      }
+    } else if (data.type === "chat") {
+      appendChatMessage(data.sender, data.text, false);
+    } else if (data.type === "file_meta") {
+      receivingFiles.set(data.fileId, {
+        meta: data,
+        chunks: [],
+        receivedChunks: 0,
+      });
+      progressWrapper.classList.remove("hidden");
+      transferFileTitle.textContent = `Receiving: ${data.name}`;
+    } else if (data.type === "file_chunk") {
+      const record = receivingFiles.get(data.fileId);
+      if (!record) return;
+
+      record.chunks[data.index] = base64ToArrayBuffer(data.data);
+      record.receivedChunks++;
+
+      const percent = Math.min(100, Math.round((record.receivedChunks / record.meta.totalChunks) * 100));
+      progressBar.style.width = `${percent}%`;
+      transferFilePercent.textContent = `${percent}%`;
+    } else if (data.type === "file_finish") {
+      const record = receivingFiles.get(data.fileId);
+      if (!record) return;
+
+      progressWrapper.classList.add("hidden");
+      progressBar.style.width = "0%";
+
+      const blob = new Blob(record.chunks, { type: record.meta.mime });
+      saveAndDisplayFile(blob, record.meta.name, record.meta.mime, data.sender);
+      receivingFiles.delete(data.fileId);
+    }
+  }
+
+  // Display Received File with In-Chat Media Preview
+  function saveAndDisplayFile(blob, name, mime, sender) {
     const url = URL.createObjectURL(blob);
-    const emptyState = receivedList.querySelector(".empty-state");
-    if (emptyState) emptyState.remove();
 
-    const item = document.createElement("div");
-    item.className = "received-item";
-    item.innerHTML = `
-      <div>
-        <strong>${name}</strong>
-        <span style="color:#8b949e; margin-left: 8px;">(${formatBytes(size)})</span>
-      </div>
-      <a href="${url}" download="${name}">Save</a>
-    `;
-    receivedList.prepend(item);
-
-    // Trigger auto-download
+    // Auto-trigger browser download
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
     a.click();
-    log(`File "${name}" (${formatBytes(size)}) received and downloaded.`, "success");
+
+    // Render Preview in Chat
+    const wrapper = document.createElement("div");
+    wrapper.className = "chat-bubble peer";
+    wrapper.innerHTML = `<div class="chat-author">${sender} (Shared File)</div><div>📄 <strong>${name}</strong> (${formatBytes(blob.size)})</div>`;
+
+    if (mime.startsWith("image/")) {
+      wrapper.innerHTML += `<div class="chat-media-preview"><img src="${url}" alt="${name}" /></div>`;
+    } else if (mime.startsWith("video/")) {
+      wrapper.innerHTML += `<div class="chat-media-preview"><video src="${url}" controls></video></div>`;
+    } else if (mime.startsWith("audio/")) {
+      wrapper.innerHTML += `<div class="chat-media-preview"><audio src="${url}" controls></audio></div>`;
+    }
+
+    wrapper.innerHTML += `<a href="${url}" download="${name}" style="color:#60a5fa; text-decoration: underline; font-size:0.75rem; display:inline-block; margin-top:4px;">Download again</a>`;
+    chatMessages.appendChild(wrapper);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    log(`File "${name}" successfully received.`, "success");
   }
 
-  // --- Drag & Drop Operations ---
-  ["dragenter", "dragover"].forEach((evt) => {
-    dropZone.addEventListener(evt, (e) => {
+  // 6. Send Files in Base64 Chunks
+  sendFilesBtn.addEventListener("click", async () => {
+    if (!activeConnections.size) {
+      showAlert("No connected devices to send files to.");
+      return;
+    }
+    if (!selectedFiles.length) return;
+
+    sendFilesBtn.disabled = true;
+    progressWrapper.classList.remove("hidden");
+
+    for (const file of selectedFiles) {
+      const fileId = `${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+      transferFileTitle.textContent = `Sending: ${file.name}`;
+
+      // 1. Send Metadata
+      broadcastData({
+        type: "file_meta",
+        fileId,
+        name: file.name,
+        size: file.size,
+        mime: file.type || "application/octet-stream",
+        totalChunks,
+        sender: myName,
+      });
+
+      // 2. Read & Broadcast Chunks
+      for (let i = 0; i < totalChunks; i++) {
+        const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        const buffer = await slice.arrayBuffer();
+        const base64Chunk = arrayBufferToBase64(buffer);
+
+        broadcastData({
+          type: "file_chunk",
+          fileId,
+          index: i,
+          data: base64Chunk,
+        });
+
+        const percent = Math.min(100, Math.round(((i + 1) / totalChunks) * 100));
+        progressBar.style.width = `${percent}%`;
+        transferFilePercent.textContent = `${percent}%`;
+
+        // Small pause to prevent buffer overflow
+        await new Promise((r) => setTimeout(r, 6));
+      }
+
+      // 3. Send Complete Marker
+      broadcastData({ type: "file_finish", fileId, sender: myName });
+
+      // Append into own chat as sent
+      appendFileSentNotification(file);
+      log(`Sent: ${file.name}`, "success");
+    }
+
+    setTimeout(() => {
+      progressWrapper.classList.add("hidden");
+      progressBar.style.width = "0%";
+      selectedFiles = [];
+      selectedFilesList.innerHTML = "";
+      sendFilesBtn.disabled = false;
+    }, 800);
+  });
+
+  function broadcastData(payload) {
+    const str = JSON.stringify(payload);
+    activeConnections.forEach(({ conn }) => {
+      if (conn.open) conn.send(str);
+    });
+  }
+
+  function appendFileSentNotification(file) {
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble mine";
+    bubble.innerHTML = `<div class="chat-author">You</div><div>📤 Sent <strong>${file.name}</strong> (${formatBytes(file.size)})</div>`;
+    chatMessages.appendChild(bubble);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  // 7. Drag & Drop Handlers
+  ["dragenter", "dragover"].forEach((eName) => {
+    dropZone.addEventListener(eName, (e) => {
       e.preventDefault();
       dropZone.classList.add("dragover");
     });
   });
 
-  ["dragleave", "drop"].forEach((evt) => {
-    dropZone.addEventListener(evt, (e) => {
+  ["dragleave", "drop"].forEach((eName) => {
+    dropZone.addEventListener(eName, (e) => {
       e.preventDefault();
       dropZone.classList.remove("dragover");
     });
   });
 
   dropZone.addEventListener("drop", (e) => {
-    if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files.length) handleFilesSelected(e.dataTransfer.files);
   });
 
   fileInput.addEventListener("change", (e) => {
-    if (e.target.files.length) handleFiles(e.target.files);
+    if (e.target.files.length) handleFilesSelected(e.target.files);
   });
 
-  function handleFiles(files) {
+  function handleFilesSelected(files) {
     selectedFiles = Array.from(files);
-    fileList.innerHTML = "";
+    selectedFilesList.innerHTML = "";
 
     selectedFiles.forEach((file) => {
       const el = document.createElement("div");
-      el.className = "file-item";
-      el.innerHTML = `<span>📄 ${file.name}</span><span style="color:#8b949e">${formatBytes(file.size)}</span>`;
-      fileList.appendChild(el);
+      el.className = "file-badge-item";
+      el.innerHTML = `<span>📄 ${file.name}</span><span style="color:#64748b">${formatBytes(file.size)}</span>`;
+      selectedFilesList.appendChild(el);
     });
 
-    if (activeConn && activeConn.open) {
-      sendBtn.disabled = false;
+    if (activeConnections.size > 0) {
+      sendFilesBtn.disabled = false;
     } else {
-      showInfo("Files queued. Connect another device with the 4-digit PIN to send.");
+      showAlert("Files staged. Once devices connect to this room, click 'Send'.", false);
     }
   }
 
-  // --- Send Files ---
-  sendBtn.addEventListener("click", async () => {
-    if (!activeConn || !selectedFiles.length) return;
+  // 8. Live Chat
+  function appendChatMessage(author, text, isMine) {
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${isMine ? "mine" : "peer"}`;
+    bubble.innerHTML = `<div class="chat-author">${author}</div><div>${text}</div>`;
+    chatMessages.appendChild(bubble);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
 
-    sendBtn.disabled = true;
-    progressContainer.classList.remove("hidden");
+  function appendSystemMessage(msg) {
+    const div = document.createElement("div");
+    div.className = "chat-system";
+    div.textContent = msg;
+    chatMessages.appendChild(div);
+  }
 
-    for (const file of selectedFiles) {
-      transferFilename.textContent = `Sending: ${file.name}`;
-      activeConn.send({
-        type: "meta",
-        meta: { name: file.name, size: file.size, type: file.type },
-      });
-
-      let offset = 0;
-      while (offset < file.size) {
-        const slice = file.slice(offset, offset + CHUNK_SIZE);
-        const buffer = await slice.arrayBuffer();
-
-        activeConn.send({
-          type: "chunk",
-          chunk: buffer,
-        });
-
-        offset += CHUNK_SIZE;
-        const percent = Math.min(100, Math.round((offset / file.size) * 100));
-        progressFill.style.width = `${percent}%`;
-        transferPercent.textContent = `${percent}%`;
-
-        // Backpressure yield
-        await new Promise((r) => setTimeout(r, 8));
-      }
-
-      activeConn.send({ type: "done" });
-      log(`Sent: ${file.name}`, "success");
-    }
-
-    setTimeout(() => {
-      progressContainer.classList.add("hidden");
-      progressFill.style.width = "0%";
-      sendBtn.disabled = false;
-    }, 1000);
+  sendChatBtn.addEventListener("click", sendChat);
+  chatText.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") sendChat();
   });
 
-  // --- Button & PIN Handlers ---
-  joinPinBtn.addEventListener("click", () => enterRoom(pinInput.value.trim()));
+  function sendChat() {
+    const text = chatText.value.trim();
+    if (!text) return;
 
-  randomPinBtn.addEventListener("click", () => {
-    const random = Math.floor(1000 + Math.random() * 9000).toString();
-    pinInput.value = random;
-    enterRoom(random);
-  });
+    appendChatMessage(myName, text, true);
+    broadcastData({ type: "chat", sender: myName, text });
+    chatText.value = "";
+  }
 
-  copyBtn.addEventListener("click", () => {
-    if (!shareLinkInput.value.startsWith("http")) {
-      showError("Please enter a 4-digit room first.");
+  // 9. WebRTC Audio / Video Call
+  startCallBtn.addEventListener("click", async () => {
+    if (!activeConnections.size) {
+      showAlert("Please wait for another device to enter the room before calling.");
       return;
     }
+
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
+      videoContainer.classList.remove("hidden");
+
+      startCallBtn.classList.add("hidden");
+      endCallBtn.classList.remove("hidden");
+      toggleMicBtn.classList.remove("hidden");
+      toggleCamBtn.classList.remove("hidden");
+
+      // Call first peer in room
+      const remotePeerId = activeConnections.keys().next().value;
+      currentCall = peer.call(remotePeerId, localStream);
+
+      currentCall.on("stream", (remoteStream) => {
+        remoteVideo.srcObject = remoteStream;
+      });
+
+      currentCall.on("close", cleanupCall);
+      log(`Calling remote peer...`, "info");
+    } catch (err) {
+      showAlert(`Camera/Microphone access error: ${err.message}`);
+    }
+  });
+
+  function handleIncomingCall(call) {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then((stream) => {
+        localStream = stream;
+        localVideo.srcObject = stream;
+        videoContainer.classList.remove("hidden");
+
+        startCallBtn.classList.add("hidden");
+        endCallBtn.classList.remove("hidden");
+        toggleMicBtn.classList.remove("hidden");
+        toggleCamBtn.classList.remove("hidden");
+
+        call.answer(stream);
+        currentCall = call;
+
+        call.on("stream", (remoteStream) => {
+          remoteVideo.srcObject = remoteStream;
+        });
+
+        call.on("close", cleanupCall);
+      })
+      .catch((err) => showAlert(`Microphone/Camera permission error: ${err.message}`));
+  }
+
+  function cleanupCall() {
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+      localStream = null;
+    }
+    localVideo.srcObject = null;
+    remoteVideo.srcObject = null;
+    videoContainer.classList.add("hidden");
+
+    startCallBtn.classList.remove("hidden");
+    endCallBtn.classList.add("hidden");
+    toggleMicBtn.classList.add("hidden");
+    toggleCamBtn.classList.add("hidden");
+  }
+
+  endCallBtn.addEventListener("click", () => {
+    if (currentCall) currentCall.close();
+    cleanupCall();
+  });
+
+  toggleMicBtn.addEventListener("click", () => {
+    if (!localStream) return;
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled;
+      toggleMicBtn.textContent = audioTrack.enabled ? "🎤 Mute" : "🔇 Unmute";
+    }
+  });
+
+  toggleCamBtn.addEventListener("click", () => {
+    if (!localStream) return;
+    const videoTrack = localStream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.enabled = !videoTrack.enabled;
+      toggleCamBtn.textContent = videoTrack.enabled ? "📷 Video Off" : "📷 Video On";
+    }
+  });
+
+  // 10. Recording Session Feature
+  recordCallBtn.addEventListener("click", async () => {
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      // Stop recording
+      mediaRecorder.stop();
+      recordCallBtn.textContent = "⏺ Record Session";
+      recordIndicator.classList.add("hidden");
+      return;
+    }
+
+    try {
+      let streamToRecord = localStream;
+      if (!streamToRecord) {
+        // Record screen / window if not in a call
+        streamToRecord = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      }
+
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: "video/webm" });
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const recordedBlob = new Blob(recordedChunks, { type: "video/webm" });
+        const downloadUrl = URL.createObjectURL(recordedBlob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = `Dhurta-Session-${Date.now()}.webm`;
+        a.click();
+        log("Recording saved and downloaded.", "success");
+      };
+
+      mediaRecorder.start();
+      recordCallBtn.textContent = "⏹ Stop Recording";
+      recordIndicator.classList.remove("hidden");
+      log("Recording started...", "info");
+    } catch (err) {
+      showAlert(`Could not start recorder: ${err.message}`);
+    }
+  });
+
+  // 11. Multi-Window & Diagnostic Handlers
+  openNewWindowBtn.addEventListener("click", () => {
+    const url = shareLinkInput.value.startsWith("http") ? shareLinkInput.value : window.location.href;
+    window.open(url, "_blank", "width=900,height=800");
+  });
+
+  copyLinkBtn.addEventListener("click", () => {
     navigator.clipboard.writeText(shareLinkInput.value).then(() => {
-      copyBtn.textContent = "Copied!";
-      setTimeout(() => (copyBtn.textContent = "Copy"), 2000);
+      copyLinkBtn.textContent = "Copied!";
+      setTimeout(() => (copyLinkBtn.textContent = "Copy"), 2000);
     });
   });
 
-  // --- Built-in Diagnostic Self-Test ---
+  joinRoomBtn.addEventListener("click", () => enterRoom(pinInput.value.trim()));
+
+  randomRoomBtn.addEventListener("click", () => {
+    const rand = Math.floor(1000 + Math.random() * 9000).toString();
+    enterRoom(rand);
+  });
+
   selfTestBtn.addEventListener("click", async () => {
     diagPanel.classList.remove("hidden");
-    diagList.innerHTML = "<li>Testing browser WebRTC support...</li>";
+    diagList.innerHTML = "<li>Running diagnostic check...</li>";
 
-    // Test 1: Browser WebRTC
-    const rtcSupported = !!(window.RTCPeerConnection && window.RTCDataChannel);
-    diagList.innerHTML = `<li>WebRTC Support: ${rtcSupported ? "✅ Supported" : "❌ Not Supported"}</li>`;
+    const rtc = !!(window.RTCPeerConnection && window.MediaRecorder);
+    diagList.innerHTML = `<li>WebRTC + MediaRecorder Support: ${rtc ? "✅ Supported" : "❌ Unsupported"}</li>`;
 
-    // Test 2: STUN Server Candidates
-    diagList.innerHTML += "<li>Testing STUN / ICE candidate generation...</li>";
     try {
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      const test = new Peer();
+      test.on("open", (id) => {
+        diagList.innerHTML += `<li>PeerJS Cloud Signaling: ✅ Operational (ID: ${id.slice(0, 6)}...)</li>`;
+        test.destroy();
       });
-      pc.createDataChannel("test");
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      const icePass = await new Promise((resolve) => {
-        pc.onicecandidate = (e) => {
-          if (e.candidate) resolve(true);
-        };
-        setTimeout(() => resolve(false), 4000);
-      });
-
-      pc.close();
-      diagList.innerHTML += `<li>STUN Server (Google): ${icePass ? "✅ Reached" : "⚠️ Warning: STUN Slow or Blocked"}</li>`;
-    } catch (e) {
-      diagList.innerHTML += `<li style="color:#f85149">STUN Test Failed: ${e.message}</li>`;
-    }
-
-    // Test 3: PeerJS Signaling
-    diagList.innerHTML += "<li>Testing PeerJS Cloud Signaling...</li>";
-    try {
-      const testPeer = new Peer();
-      testPeer.on("open", (id) => {
-        diagList.innerHTML += `<li>PeerJS Cloud Signaling: ✅ Working (Assigned ID: ${id.slice(0, 8)}...)</li>`;
-        testPeer.destroy();
-      });
-      testPeer.on("error", (err) => {
-        diagList.innerHTML += `<li style="color:#f85149">PeerJS Signaling Error: ${err.type}</li>`;
+      test.on("error", (err) => {
+        diagList.innerHTML += `<li style="color:#ef4444">PeerJS Signaling Error: ${err.type}</li>`;
       });
     } catch (e) {
-      diagList.innerHTML += `<li style="color:#f85149">PeerJS Init Failed: ${e.message}</li>`;
+      diagList.innerHTML += `<li style="color:#ef4444">Test failed: ${e.message}</li>`;
     }
   });
 
-  // Auto-fill from URL query param (?pin=4829)
-  const urlParams = new URLSearchParams(window.location.search);
-  const pinFromUrl = urlParams.get("pin");
-  if (pinFromUrl && /^\d{4}$/.test(pinFromUrl)) {
-    pinInput.value = pinFromUrl;
-    enterRoom(pinFromUrl);
+  // URL Query PIN Auto-Init (?pin=XXXX)
+  const urlParamPin = new URLSearchParams(window.location.search).get("pin");
+  if (urlParamPin && /^\d{4}$/.test(urlParamPin)) {
+    enterRoom(urlParamPin);
   } else {
-    // Generate a default 4-digit code on load
-    const defaultPin = Math.floor(1000 + Math.random() * 9000).toString();
-    pinInput.value = defaultPin;
-    enterRoom(defaultPin);
+    const initialPin = Math.floor(1000 + Math.random() * 9000).toString();
+    enterRoom(initialPin);
   }
 });
