@@ -1,11 +1,26 @@
 document.addEventListener("DOMContentLoaded", () => {
+  // Elements
+  const pinInput = document.getElementById("pin-input");
+  const joinPinBtn = document.getElementById("btn-join-pin");
+  const randomPinBtn = document.getElementById("btn-random-pin");
+  const currentRoomTag = document.getElementById("current-room-tag");
+  const activePinDisplay = document.getElementById("active-pin-display");
+
   const qrContainer = document.getElementById("qrcode");
-  const qrLoading = document.getElementById("qr-loading");
+  const qrPlaceholder = document.getElementById("qr-placeholder");
   const shareLinkInput = document.getElementById("share-link");
   const copyBtn = document.getElementById("btn-copy");
   const statusPill = document.getElementById("status-pill");
-  const connectBtn = document.getElementById("btn-connect");
-  const targetPeerInput = document.getElementById("target-peer-id");
+
+  const errorBanner = document.getElementById("error-banner");
+  const errorMessage = document.getElementById("error-message");
+  const closeErrorBtn = document.getElementById("btn-close-error");
+
+  const selfTestBtn = document.getElementById("btn-self-test");
+  const diagPanel = document.getElementById("diag-panel");
+  const diagList = document.getElementById("diag-list");
+  const closeDiagBtn = document.getElementById("btn-close-diag");
+  const logOutput = document.getElementById("log-output");
 
   const dropZone = document.getElementById("drop-zone");
   const fileInput = document.getElementById("file-input");
@@ -20,11 +35,36 @@ document.addEventListener("DOMContentLoaded", () => {
   let peer = null;
   let activeConn = null;
   let selectedFiles = [];
-  let qrCodeInstance = null;
+  let currentPin = null;
+  const CHUNK_SIZE = 16 * 1024; // 16KB
 
-  const CHUNK_SIZE = 16 * 1024; // 16KB chunks for smooth WebRTC streaming
+  // Log Helper & On-screen Alerts
+  function log(msg, type = "default") {
+    const time = new Date().toLocaleTimeString();
+    const line = document.createElement("div");
+    line.className = `log-line ${type}`;
+    line.textContent = `[${time}] ${msg}`;
+    logOutput.appendChild(line);
+    logOutput.scrollTop = logOutput.scrollHeight;
+  }
 
-  // Format bytes
+  function showError(msg) {
+    errorMessage.textContent = msg;
+    errorBanner.className = "alert-banner";
+    errorBanner.classList.remove("hidden");
+    log(`ERROR: ${msg}`, "error");
+  }
+
+  function showInfo(msg) {
+    errorMessage.textContent = msg;
+    errorBanner.className = "alert-banner info";
+    errorBanner.classList.remove("hidden");
+    log(msg, "info");
+  }
+
+  closeErrorBtn.addEventListener("click", () => errorBanner.classList.add("hidden"));
+  closeDiagBtn.addEventListener("click", () => diagPanel.classList.add("hidden"));
+
   function formatBytes(bytes) {
     if (bytes === 0) return "0 B";
     const k = 1024;
@@ -33,30 +73,46 @@ document.addEventListener("DOMContentLoaded", () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   }
 
-  // 1. Guaranteed Client-Side QR Generator
-  function renderQRCode(url) {
+  // QR Code Renderer
+  function renderQR(url) {
+    qrPlaceholder.style.display = "none";
     qrContainer.innerHTML = "";
-    qrLoading.style.display = "none";
-    qrCodeInstance = new QRCode(qrContainer, {
+    new QRCode(qrContainer, {
       text: url,
-      width: 190,
-      height: 190,
+      width: 180,
+      height: 180,
       colorDark: "#0d1117",
       colorLight: "#ffffff",
       correctLevel: QRCode.CorrectLevel.M,
     });
   }
 
-  // Check URL query param for existing room (e.g., ?join=PEER_ID)
-  const urlParams = new URLSearchParams(window.location.search);
-  const joinPeerId = urlParams.get("join");
+  // --- 4-Digit Room Manager ---
+  function enterRoom(pin) {
+    if (!/^\d{4}$/.test(pin)) {
+      showError("Please enter a valid 4-digit number (e.g. 4829).");
+      return;
+    }
 
-  // 2. Initialize WebRTC Peer
-  function initPeer() {
-    qrLoading.style.display = "block";
+    currentPin = pin;
+    activePinDisplay.textContent = pin;
+    currentRoomTag.classList.remove("hidden");
+
+    const hostPeerId = `dhurta-room-${pin}`;
+    const joinUrl = `${window.location.origin}${window.location.pathname}?pin=${pin}`;
+    shareLinkInput.value = joinUrl;
+    renderQR(joinUrl);
+
+    if (peer) {
+      peer.destroy();
+    }
+
+    log(`Attempting to claim or join Room #${pin}...`, "info");
     statusPill.textContent = "Connecting...";
+    statusPill.className = "status-pill online";
 
-    peer = new Peer({
+    // Attempt 1: Try to claim the room as the primary host
+    peer = new Peer(hostPeerId, {
       config: {
         iceServers: [
           { urls: "stun:stun.l.google.com:19302" },
@@ -66,53 +122,62 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     peer.on("open", (id) => {
-      statusPill.textContent = "Ready";
+      log(`Room ${pin} created! Waiting for device 2 to enter PIN...`, "success");
+      statusPill.textContent = `Room ${pin} Ready`;
       statusPill.className = "status-pill online";
-
-      // Formulate joinable URL
-      const currentUrl = window.location.origin + window.location.pathname;
-      const connectionUrl = `${currentUrl}?join=${id}`;
-      shareLinkInput.value = connectionUrl;
-
-      // Render the QR code immediately once ID is established
-      renderQRCode(connectionUrl);
-
-      // If user joined with a link, auto-connect to the host
-      if (joinPeerId) {
-        setupConnection(peer.connect(joinPeerId));
-      }
     });
 
-    // Handle incoming connections from the second device
     peer.on("connection", (conn) => {
-      setupConnection(conn);
+      log(`Incoming connection established in room ${pin}!`, "success");
+      setupDataConnection(conn);
     });
 
     peer.on("error", (err) => {
-      console.error("PeerJS Error:", err);
-      statusPill.textContent = "Reconnecting...";
-      statusPill.className = "status-pill offline";
+      // Room already exists: join as a guest peer!
+      if (err.type === "unavailable-id") {
+        log(`Room ${pin} already exists on another device. Joining as guest...`, "info");
+        joinAsGuest(hostPeerId);
+      } else {
+        showError(`Signaling error: ${err.message || err.type}`);
+      }
     });
   }
 
-  // 3. Setup Connection Events
-  function setupConnection(conn) {
+  function joinAsGuest(targetHostId) {
+    if (peer) peer.destroy();
+
+    // Create random guest peer and connect to the room host
+    peer = new Peer();
+    peer.on("open", (guestId) => {
+      log(`Guest initiated. Connecting to Room Host (${targetHostId})...`, "info");
+      const conn = peer.connect(targetHostId);
+      setupDataConnection(conn);
+    });
+
+    peer.on("error", (err) => {
+      showError(`Guest connection failed: ${err.message || err.type}`);
+    });
+  }
+
+  function setupDataConnection(conn) {
     activeConn = conn;
 
     conn.on("open", () => {
-      statusPill.textContent = "Connected";
+      statusPill.textContent = `Connected (Room ${currentPin})`;
       statusPill.className = "status-pill connected";
+      showInfo(`Devices paired successfully in Room ${currentPin}!`);
       if (selectedFiles.length > 0) sendBtn.disabled = false;
     });
 
     conn.on("close", () => {
-      statusPill.textContent = "Ready";
+      statusPill.textContent = `Room ${currentPin} (Waiting)`;
       statusPill.className = "status-pill online";
+      showError("Peer disconnected from the room.");
       sendBtn.disabled = true;
       activeConn = null;
     });
 
-    // Receive incoming data chunks
+    // Chunk Receiver
     let incomingFile = { meta: null, chunks: [], receivedBytes: 0 };
 
     conn.on("data", (data) => {
@@ -132,13 +197,12 @@ document.addEventListener("DOMContentLoaded", () => {
         progressFill.style.width = "0%";
 
         const blob = new Blob(incomingFile.chunks, { type: incomingFile.meta.type });
-        addReceivedFile(blob, incomingFile.meta.name, incomingFile.meta.size);
+        renderDownloadedFile(blob, incomingFile.meta.name, incomingFile.meta.size);
       }
     });
   }
 
-  // 4. Add Received File to List and Auto-Download
-  function addReceivedFile(blob, name, size) {
+  function renderDownloadedFile(blob, name, size) {
     const url = URL.createObjectURL(blob);
     const emptyState = receivedList.querySelector(".empty-state");
     if (emptyState) emptyState.remove();
@@ -159,49 +223,51 @@ document.addEventListener("DOMContentLoaded", () => {
     a.href = url;
     a.download = name;
     a.click();
+    log(`File "${name}" (${formatBytes(size)}) received and downloaded.`, "success");
   }
 
-  // 5. Drag & Drop File Handling
-  ["dragenter", "dragover"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (e) => {
+  // --- Drag & Drop Operations ---
+  ["dragenter", "dragover"].forEach((evt) => {
+    dropZone.addEventListener(evt, (e) => {
       e.preventDefault();
       dropZone.classList.add("dragover");
     });
   });
 
-  ["dragleave", "drop"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (e) => {
+  ["dragleave", "drop"].forEach((evt) => {
+    dropZone.addEventListener(evt, (e) => {
       e.preventDefault();
       dropZone.classList.remove("dragover");
     });
   });
 
   dropZone.addEventListener("drop", (e) => {
-    const files = e.dataTransfer.files;
-    if (files.length) handleFilesSelected(files);
+    if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
   });
 
   fileInput.addEventListener("change", (e) => {
-    if (e.target.files.length) handleFilesSelected(e.target.files);
+    if (e.target.files.length) handleFiles(e.target.files);
   });
 
-  function handleFilesSelected(files) {
+  function handleFiles(files) {
     selectedFiles = Array.from(files);
     fileList.innerHTML = "";
 
     selectedFiles.forEach((file) => {
       const el = document.createElement("div");
       el.className = "file-item";
-      el.innerHTML = `<span>📄 ${file.name}</span><span class="size">${formatBytes(file.size)}</span>`;
+      el.innerHTML = `<span>📄 ${file.name}</span><span style="color:#8b949e">${formatBytes(file.size)}</span>`;
       fileList.appendChild(el);
     });
 
     if (activeConn && activeConn.open) {
       sendBtn.disabled = false;
+    } else {
+      showInfo("Files queued. Connect another device with the 4-digit PIN to send.");
     }
   }
 
-  // 6. Send File Chunks
+  // --- Send Files ---
   sendBtn.addEventListener("click", async () => {
     if (!activeConn || !selectedFiles.length) return;
 
@@ -210,8 +276,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     for (const file of selectedFiles) {
       transferFilename.textContent = `Sending: ${file.name}`;
-
-      // Send metadata
       activeConn.send({
         type: "meta",
         meta: { name: file.name, size: file.size, type: file.type },
@@ -232,11 +296,12 @@ document.addEventListener("DOMContentLoaded", () => {
         progressFill.style.width = `${percent}%`;
         transferPercent.textContent = `${percent}%`;
 
-        // Small yield to prevent WebRTC data channel backpressure
+        // Backpressure yield
         await new Promise((r) => setTimeout(r, 8));
       }
 
       activeConn.send({ type: "done" });
+      log(`Sent: ${file.name}`, "success");
     }
 
     setTimeout(() => {
@@ -246,21 +311,84 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 1000);
   });
 
-  // 7. Manual Connect & Copy Helpers
-  connectBtn.addEventListener("click", () => {
-    const targetId = targetPeerInput.value.trim();
-    if (targetId) {
-      setupConnection(peer.connect(targetId));
-    }
+  // --- Button & PIN Handlers ---
+  joinPinBtn.addEventListener("click", () => enterRoom(pinInput.value.trim()));
+
+  randomPinBtn.addEventListener("click", () => {
+    const random = Math.floor(1000 + Math.random() * 9000).toString();
+    pinInput.value = random;
+    enterRoom(random);
   });
 
   copyBtn.addEventListener("click", () => {
+    if (!shareLinkInput.value.startsWith("http")) {
+      showError("Please enter a 4-digit room first.");
+      return;
+    }
     navigator.clipboard.writeText(shareLinkInput.value).then(() => {
       copyBtn.textContent = "Copied!";
       setTimeout(() => (copyBtn.textContent = "Copy"), 2000);
     });
   });
 
-  // Start peer
-  initPeer();
+  // --- Built-in Diagnostic Self-Test ---
+  selfTestBtn.addEventListener("click", async () => {
+    diagPanel.classList.remove("hidden");
+    diagList.innerHTML = "<li>Testing browser WebRTC support...</li>";
+
+    // Test 1: Browser WebRTC
+    const rtcSupported = !!(window.RTCPeerConnection && window.RTCDataChannel);
+    diagList.innerHTML = `<li>WebRTC Support: ${rtcSupported ? "✅ Supported" : "❌ Not Supported"}</li>`;
+
+    // Test 2: STUN Server Candidates
+    diagList.innerHTML += "<li>Testing STUN / ICE candidate generation...</li>";
+    try {
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+      pc.createDataChannel("test");
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const icePass = await new Promise((resolve) => {
+        pc.onicecandidate = (e) => {
+          if (e.candidate) resolve(true);
+        };
+        setTimeout(() => resolve(false), 4000);
+      });
+
+      pc.close();
+      diagList.innerHTML += `<li>STUN Server (Google): ${icePass ? "✅ Reached" : "⚠️ Warning: STUN Slow or Blocked"}</li>`;
+    } catch (e) {
+      diagList.innerHTML += `<li style="color:#f85149">STUN Test Failed: ${e.message}</li>`;
+    }
+
+    // Test 3: PeerJS Signaling
+    diagList.innerHTML += "<li>Testing PeerJS Cloud Signaling...</li>";
+    try {
+      const testPeer = new Peer();
+      testPeer.on("open", (id) => {
+        diagList.innerHTML += `<li>PeerJS Cloud Signaling: ✅ Working (Assigned ID: ${id.slice(0, 8)}...)</li>`;
+        testPeer.destroy();
+      });
+      testPeer.on("error", (err) => {
+        diagList.innerHTML += `<li style="color:#f85149">PeerJS Signaling Error: ${err.type}</li>`;
+      });
+    } catch (e) {
+      diagList.innerHTML += `<li style="color:#f85149">PeerJS Init Failed: ${e.message}</li>`;
+    }
+  });
+
+  // Auto-fill from URL query param (?pin=4829)
+  const urlParams = new URLSearchParams(window.location.search);
+  const pinFromUrl = urlParams.get("pin");
+  if (pinFromUrl && /^\d{4}$/.test(pinFromUrl)) {
+    pinInput.value = pinFromUrl;
+    enterRoom(pinFromUrl);
+  } else {
+    // Generate a default 4-digit code on load
+    const defaultPin = Math.floor(1000 + Math.random() * 9000).toString();
+    pinInput.value = defaultPin;
+    enterRoom(defaultPin);
+  }
 });
