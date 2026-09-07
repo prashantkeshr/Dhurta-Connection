@@ -2,169 +2,270 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dhurta Connection | WhatsApp Web P2P</title>
-  
-  <!-- Reliable MQTT Signaling & QRCode Generator -->
-  <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#111b21" />
+  <title>Dhurta Connection | Offline P2P Space</title>
+  <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
+  <!-- Embedded libraries for QR generation and MQTT (Cached locally via Service Worker) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
 </head>
-<body class="whatsapp-theme">
-  <!-- Incoming Call Modal -->
-  <div id="incoming-call-modal" class="call-modal hidden">
-    <div class="call-modal-content">
-      <div class="call-avatar" id="call-caller-avatar">👤</div>
-      <h3 id="call-caller-name">Incoming Call...</h3>
-      <p>Room Audio/Video Call</p>
-      <div class="call-modal-actions">
-        <button id="btn-accept-call" class="btn-call-accept">📞 Accept</button>
-        <button id="btn-reject-call" class="btn-call-reject">✖ Decline</button>
+<body class="wa-dark">
+
+  <!-- ==================== MODALS & OVERLAYS ==================== -->
+
+  <!-- QR Scanner Camera Modal (For Data-Off Air-Gapped Pairing) -->
+  <div id="camera-modal" class="modal-backdrop hidden">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <span class="modal-title">Scan Peer's Connection QR</span>
+        <button id="btn-close-cam" class="icon-btn" aria-label="Close">
+          <svg class="svg-icon" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="scanner-body">
+        <video id="scanner-video" autoplay playsinline muted></video>
+        <div class="scan-reticle"></div>
+        <p class="scan-guide">Point camera at the other device's screen</p>
       </div>
     </div>
   </div>
 
-  <!-- QR Code Modal -->
-  <div id="qr-modal" class="modal-overlay hidden">
-    <div class="modal-card">
+  <!-- QR Display Modal -->
+  <div id="qr-display-modal" class="modal-backdrop hidden">
+    <div class="modal-dialog">
       <div class="modal-header">
-        <h3>Room QR Code (<span id="qr-modal-pin">----</span>)</h3>
-        <button id="btn-close-qr" class="btn-icon">&times;</button>
+        <span class="modal-title" id="qr-modal-heading">Device Connection QR</span>
+        <button id="btn-close-qr" class="icon-btn" aria-label="Close">
+          <svg class="svg-icon" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
       </div>
-      <div class="qr-canvas-wrap">
+      <div class="qr-canvas-box">
         <div id="qrcode"></div>
       </div>
-      <p class="modal-hint">Scan with camera to join this room on mobile.</p>
+      <p class="modal-hint" id="qr-modal-caption">Scan this code using the other device's camera.</p>
+      <div class="modal-footer">
+        <button id="btn-scan-return-qr" class="btn primary full-width">Scan Other Device's Answer</button>
+      </div>
     </div>
   </div>
 
-  <!-- App Wrapper -->
-  <div class="wa-app">
-    <!-- Left Sidebar: Profile, Room Controls, Devices -->
-    <aside class="wa-sidebar">
-      <!-- Sidebar Header -->
-      <div class="wa-header sidebar-header">
-        <div class="user-profile">
-          <div class="avatar" id="my-avatar">🦊</div>
-          <div class="user-info">
-            <span class="user-name" id="my-assigned-name">Connecting...</span>
-            <span class="user-status" id="connection-status-dot">● Connecting</span>
+  <!-- Profile & Settings Drawer -->
+  <div id="settings-drawer" class="drawer-backdrop hidden">
+    <div class="drawer-panel">
+      <div class="drawer-header">
+        <button id="btn-close-settings" class="icon-btn" aria-label="Back">
+          <svg class="svg-icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        </button>
+        <h3>Settings & Profile</h3>
+      </div>
+      <div class="drawer-content">
+        <div class="profile-editor">
+          <div class="profile-pic-picker">
+            <img id="settings-avatar-img" src="" alt="Avatar" class="avatar-lg" />
+            <label for="avatar-file-input" class="avatar-edit-badge" title="Change Profile Picture">
+              <svg class="svg-icon" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              <input type="file" id="avatar-file-input" accept="image/*" />
+            </label>
+          </div>
+          <div class="field-group">
+            <label>Your Display Name</label>
+            <input type="text" id="settings-name-input" maxlength="25" />
+          </div>
+          <div class="field-group">
+            <label>Connection Mode</label>
+            <select id="setting-connection-mode">
+              <option value="auto">Auto (Offline QR + Online Backup)</option>
+              <option value="airgap">Air-Gapped (QR Only, No Data)</option>
+            </select>
+          </div>
+          <button id="btn-save-settings" class="btn primary full-width">Save Profile</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Incoming Call Ringing Overlay -->
+  <div id="incoming-call-bar" class="call-banner hidden">
+    <div class="call-caller-info">
+      <img id="caller-avatar" class="avatar-sm" src="" alt="Caller" />
+      <div>
+        <strong id="caller-name">Remote Peer</strong>
+        <span class="call-type-label">Incoming Audio/Video Call</span>
+      </div>
+    </div>
+    <div class="call-banner-actions">
+      <button id="btn-accept-call" class="btn-call accept" title="Accept">
+        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      </button>
+      <button id="btn-decline-call" class="btn-call decline" title="Decline">
+        <svg class="svg-icon" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Lightbox Media Preview Modal -->
+  <div id="lightbox-modal" class="modal-backdrop hidden">
+    <button id="btn-close-lightbox" class="lightbox-close icon-btn">
+      <svg class="svg-icon" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+    <div class="lightbox-body" id="lightbox-content"></div>
+  </div>
+
+  <!-- Drag-and-drop Backdrop -->
+  <div id="file-drop-overlay" class="drop-overlay hidden">
+    <div class="drop-box">
+      <svg class="svg-icon-xl" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+      <h3>Drop heavy files to share</h3>
+      <p>P2P Direct Stream • No file size limit</p>
+    </div>
+  </div>
+
+  <!-- ==================== MAIN APPLICATION LAYOUT ==================== -->
+  <div class="app-layout" id="app-layout">
+
+    <!-- LEFT PANE: Conversations / Device Roster -->
+    <aside class="chat-sidebar" id="chat-sidebar">
+      <div class="panel-header">
+        <div class="user-pill" id="btn-open-settings" title="Profile Settings">
+          <img id="my-avatar" class="avatar-sm" src="" alt="Avatar" />
+          <div class="user-meta">
+            <span class="user-title" id="my-display-name">Identifying...</span>
+            <span class="user-subtitle" id="net-condition-badge">● Searching</span>
           </div>
         </div>
-        <div class="header-icons">
-          <button id="btn-show-qr" class="btn-icon" title="Show Room QR">📱</button>
-          <button id="btn-refresh-room" class="btn-icon" title="Refresh & Resync Room">🔄</button>
-          <button id="btn-new-window" class="btn-icon" title="Open in New Window">🗗</button>
+        <div class="header-tools">
+          <button id="btn-open-scanner" class="icon-btn" title="Scan QR Code to Connect (Offline)">
+            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 7h3v3H7zM14 7h3v3h-3zM7 14h3v3H7zM14 14h3v3h-3z"/></svg>
+          </button>
+          <button id="btn-show-my-qr" class="icon-btn" title="Show My Pairing QR">
+            <svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h4v4h-4zM14 20h3v1h-3zM20 14h1v3h-1z"/></svg>
+          </button>
+          <button id="btn-resync-room" class="icon-btn" title="Refresh & Resync Room">
+            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
         </div>
       </div>
 
-      <!-- Room PIN Bar -->
-      <div class="wa-room-box">
-        <div class="pin-badge">
-          <span>ROOM PIN:</span>
-          <strong id="active-pin-display">----</strong>
+      <!-- 4-Digit Room Bar -->
+      <div class="room-selector-strip">
+        <div class="room-pin-display">
+          <span class="label">ROOM:</span>
+          <strong id="active-pin-text">----</strong>
         </div>
-        <div class="pin-inputs">
-          <input type="text" id="pin-input" maxlength="4" placeholder="4829" />
-          <button id="btn-enter-pin" class="btn-wa">Join</button>
-          <button id="btn-random-pin" class="btn-wa-alt">Random</button>
-        </div>
-      </div>
-
-      <!-- Search & Share Link -->
-      <div class="wa-search-bar">
-        <div class="search-input-wrap">
-          <span class="search-icon">🔗</span>
-          <input type="text" id="share-link" readonly value="Generating link..." />
-          <button id="btn-copy-link" class="btn-copy">Copy</button>
+        <div class="room-pin-actions">
+          <input type="text" id="pin-input" maxlength="4" placeholder="PIN" />
+          <button id="btn-join-pin" class="btn primary sm">Join</button>
+          <button id="btn-rand-pin" class="btn secondary sm">Rand</button>
         </div>
       </div>
 
-      <!-- Connected Devices Roster (WhatsApp Chats List) -->
-      <div class="wa-chats-list" id="devices-roster">
-        <!-- Dynamically filled -->
+      <!-- Network Quality Meter -->
+      <div class="net-meter-bar">
+        <div class="signal-gauge">
+          <span class="bar bar-1"></span>
+          <span class="bar bar-2"></span>
+          <span class="bar bar-3"></span>
+          <span class="bar bar-4"></span>
+        </div>
+        <span class="net-status-text" id="net-quality-text">Local Hotspot Ready (No Data Needed)</span>
       </div>
+
+      <!-- Devices List (WhatsApp Chat Roster) -->
+      <div class="devices-scroll-list" id="devices-roster"></div>
     </aside>
 
-    <!-- Right Area: Chat Room & Call View -->
-    <main class="wa-main">
-      <!-- Chat Header -->
-      <div class="wa-header chat-header">
-        <div class="chat-target-info">
-          <div class="avatar" id="room-avatar">⚡</div>
-          <div>
-            <div class="chat-title" id="chat-room-title">Dhurta Room #----</div>
-            <div class="chat-subtitle" id="chat-participants-count">1 participant online</div>
+    <!-- RIGHT PANE: Chat, Calls & Screen Control -->
+    <main class="chat-main" id="chat-main">
+      <div class="panel-header chat-header">
+        <div class="chat-target">
+          <!-- Mobile Back Navigation Button -->
+          <button id="btn-mobile-back" class="icon-btn mobile-only" title="Back to Devices">
+            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          </button>
+          <div class="avatar-sm circle-bg" id="room-avatar-icon">⚡</div>
+          <div class="chat-target-meta">
+            <div class="chat-title" id="chat-header-title">Dhurta Room #----</div>
+            <div class="chat-subtitle" id="chat-header-status">1 device in local session</div>
           </div>
         </div>
-        <div class="header-icons">
-          <button id="btn-call-video" class="btn-icon" title="Start Video Call">📹</button>
-          <button id="btn-call-audio" class="btn-icon" title="Start Audio Call">📞</button>
-          <button id="btn-record-session" class="btn-icon" title="Record Session">⏺</button>
+
+        <div class="header-tools">
+          <button id="btn-call-voice" class="icon-btn" title="Voice Call">
+            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          </button>
+          <button id="btn-call-video" class="icon-btn" title="Video Call">
+            <svg class="svg-icon" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </button>
+          <button id="btn-screen-share" class="icon-btn" title="Screen Share & Pointer Control">
+            <svg class="svg-icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </button>
         </div>
       </div>
 
-      <!-- Video Call Dock (Collapsible) -->
-      <div id="video-dock" class="video-dock hidden">
-        <div class="video-grid">
-          <div class="video-frame">
-            <span class="v-tag">You</span>
-            <video id="local-video" autoplay playsinline muted></video>
+      <!-- Video / Screen Control Stage (Collapsible) -->
+      <div id="video-stage" class="video-stage hidden">
+        <div class="video-viewport" id="screen-container">
+          <video id="remote-stream-video" autoplay playsinline></video>
+          <!-- Remote Interactive Pointer Marker -->
+          <div id="remote-laser-pointer" class="laser-pointer hidden"></div>
+          <div class="pip-window">
+            <video id="local-stream-video" autoplay playsinline muted></video>
           </div>
-          <div class="video-frame">
-            <span class="v-tag" id="remote-video-tag">Remote Peer</span>
-            <video id="remote-video" autoplay playsinline></video>
-          </div>
         </div>
-        <div class="call-controls">
-          <button id="btn-mute-mic" class="btn-call-ctl">🎤</button>
-          <button id="btn-toggle-cam" class="btn-call-ctl">📷</button>
-          <button id="btn-hangup" class="btn-call-ctl btn-hangup">❌ End</button>
-        </div>
-      </div>
-
-      <!-- Drag and Drop Full Screen Overlay -->
-      <div id="drop-overlay" class="drop-overlay hidden">
-        <div class="drop-modal">
-          <div class="drop-icon">📂</div>
-          <p>Drop files here to send directly to room</p>
+        <div class="media-controls-dock">
+          <button id="btn-mute-audio" class="media-dock-btn" title="Toggle Mic">
+            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+          </button>
+          <button id="btn-mute-video" class="media-dock-btn" title="Toggle Camera">
+            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          </button>
+          <button id="btn-hangup" class="media-dock-btn hangup" title="End Call">
+            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91M1 1l22 22"/></svg>
+          </button>
         </div>
       </div>
 
-      <!-- WhatsApp Messages Stream -->
-      <div class="wa-chat-body" id="chat-stream">
-        <div class="system-date-divider"><span>TODAY</span></div>
-        <div class="system-security-banner">
-          🔒 Messages and heavy file transfers are end-to-end P2P encrypted. Nobody outside this room can read or download them.
+      <!-- Messages Stream (WhatsApp Wallpaper Background) -->
+      <div class="chat-body" id="chat-messages">
+        <div class="chat-date-pill"><span>TODAY</span></div>
+        <div class="e2e-notice">
+          🔒 Offline LAN Encrypted. Shared directly over your local Wi-Fi / Hotspot without going through the internet.
         </div>
       </div>
 
-      <!-- Live Heavy Transfer Floating Bar -->
-      <div id="transfer-tray" class="transfer-tray hidden">
-        <div class="tray-info">
-          <span id="tray-filename">Transferring file...</span>
-          <span id="tray-percent">0%</span>
+      <!-- Heavy File Transfer Monitor (Docked) -->
+      <div id="transfer-monitor" class="transfer-monitor hidden">
+        <div class="monitor-top">
+          <span id="trans-title" class="trans-title">Transferring: file.zip</span>
+          <span id="trans-pct" class="trans-pct">0%</span>
         </div>
-        <div class="tray-bar">
-          <div id="tray-bar-fill" class="tray-bar-fill"></div>
+        <div class="progress-track">
+          <div id="trans-bar" class="progress-fill"></div>
         </div>
-        <div class="tray-speed" id="tray-speed-text">0 MB/s</div>
+        <div class="monitor-bottom">
+          <span id="trans-bytes">0 MB / 0 MB</span>
+          <span id="trans-speed">0 MB/s</span>
+        </div>
       </div>
 
-      <!-- Bottom Chat Bar -->
-      <div class="wa-footer">
-        <label for="file-picker" class="btn-icon attachment-btn" title="Send Document or Media">
-          📎
-          <input type="file" id="file-picker" multiple />
+      <!-- Bottom Chat Input Bar -->
+      <div class="chat-input-bar">
+        <label for="file-input-btn" class="icon-btn attachment-btn" title="Attach Document, Photo or Video">
+          <svg class="svg-icon" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          <input type="file" id="file-input-btn" multiple />
         </label>
-        <div class="input-wrap">
-          <input type="text" id="chat-input" placeholder="Type a message or drop files..." autocomplete="off" />
+        <div class="text-input-wrapper">
+          <input type="text" id="chat-text-input" placeholder="Type a message..." autocomplete="off" />
         </div>
-        <button id="btn-send-msg" class="btn-icon send-btn" title="Send">➤</button>
+        <button id="btn-send-message" class="icon-btn send-btn" title="Send">
+          <svg class="svg-icon send-icon" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
       </div>
     </main>
   </div>
 
-  <script src="script.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
