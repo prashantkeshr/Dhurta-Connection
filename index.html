@@ -3,175 +3,165 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dhurta Connection | High-Speed Heavy Transfer</title>
+  <title>Dhurta Connection | WhatsApp Web P2P</title>
   
-  <!-- MQTT for Signaling + QR Code Generator -->
+  <!-- Reliable MQTT Signaling & QRCode Generator -->
   <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <div class="app-container">
-    <!-- Header -->
-    <header class="top-nav">
-      <div class="brand">⚡ Dhurta <span>Connection</span> <span class="badge-tag">P2P Core</span></div>
-      
-      <div class="user-chip">
-        <span class="avatar-dot"></span>
-        <span id="my-assigned-name">Generating...</span>
+<body class="whatsapp-theme">
+  <!-- Incoming Call Modal -->
+  <div id="incoming-call-modal" class="call-modal hidden">
+    <div class="call-modal-content">
+      <div class="call-avatar" id="call-caller-avatar">👤</div>
+      <h3 id="call-caller-name">Incoming Call...</h3>
+      <p>Room Audio/Video Call</p>
+      <div class="call-modal-actions">
+        <button id="btn-accept-call" class="btn-call-accept">📞 Accept</button>
+        <button id="btn-reject-call" class="btn-call-reject">✖ Decline</button>
       </div>
-
-      <div class="nav-actions">
-        <button id="btn-refresh-room" class="btn sm secondary" title="Re-sync room connections without reloading">🔄 Refresh Room</button>
-        <button id="btn-open-window" class="btn sm secondary">🗗 New Window</button>
-        <div id="connection-pill" class="status-pill offline">Connecting...</div>
-      </div>
-    </header>
-
-    <!-- On-screen Notification Banner -->
-    <div id="alert-banner" class="alert-banner hidden">
-      <span id="alert-text"></span>
-      <button id="btn-close-alert" class="btn-close">&times;</button>
     </div>
+  </div>
 
-    <!-- Room Control Dock -->
-    <section class="card room-dock">
-      <div class="room-pin-zone">
-        <label for="pin-input">4-Digit Room PIN:</label>
-        <div class="pin-field-wrap">
+  <!-- QR Code Modal -->
+  <div id="qr-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Room QR Code (<span id="qr-modal-pin">----</span>)</h3>
+        <button id="btn-close-qr" class="btn-icon">&times;</button>
+      </div>
+      <div class="qr-canvas-wrap">
+        <div id="qrcode"></div>
+      </div>
+      <p class="modal-hint">Scan with camera to join this room on mobile.</p>
+    </div>
+  </div>
+
+  <!-- App Wrapper -->
+  <div class="wa-app">
+    <!-- Left Sidebar: Profile, Room Controls, Devices -->
+    <aside class="wa-sidebar">
+      <!-- Sidebar Header -->
+      <div class="wa-header sidebar-header">
+        <div class="user-profile">
+          <div class="avatar" id="my-avatar">🦊</div>
+          <div class="user-info">
+            <span class="user-name" id="my-assigned-name">Connecting...</span>
+            <span class="user-status" id="connection-status-dot">● Connecting</span>
+          </div>
+        </div>
+        <div class="header-icons">
+          <button id="btn-show-qr" class="btn-icon" title="Show Room QR">📱</button>
+          <button id="btn-refresh-room" class="btn-icon" title="Refresh & Resync Room">🔄</button>
+          <button id="btn-new-window" class="btn-icon" title="Open in New Window">🗗</button>
+        </div>
+      </div>
+
+      <!-- Room PIN Bar -->
+      <div class="wa-room-box">
+        <div class="pin-badge">
+          <span>ROOM PIN:</span>
+          <strong id="active-pin-display">----</strong>
+        </div>
+        <div class="pin-inputs">
           <input type="text" id="pin-input" maxlength="4" placeholder="4829" />
-          <button id="btn-join-pin" class="btn primary">Enter Room</button>
-          <button id="btn-random-pin" class="btn secondary">Random PIN</button>
+          <button id="btn-enter-pin" class="btn-wa">Join</button>
+          <button id="btn-random-pin" class="btn-wa-alt">Random</button>
         </div>
       </div>
 
-      <div class="room-link-zone">
-        <span>Invite Link:</span>
-        <div class="link-field-wrap">
-          <input type="text" id="share-link" readonly value="Connecting..." />
-          <button id="btn-copy-link" class="btn secondary sm">Copy</button>
-          <button id="btn-toggle-qr" class="btn secondary sm">Show QR</button>
+      <!-- Search & Share Link -->
+      <div class="wa-search-bar">
+        <div class="search-input-wrap">
+          <span class="search-icon">🔗</span>
+          <input type="text" id="share-link" readonly value="Generating link..." />
+          <button id="btn-copy-link" class="btn-copy">Copy</button>
         </div>
       </div>
-    </section>
 
-    <!-- QR Code Popup Drawer -->
-    <div id="qr-drawer" class="qr-drawer hidden">
-      <div class="qr-drawer-content card">
-        <div class="qr-header">
-          <h4>Scan to Join Room <span id="qr-room-label"></span></h4>
-          <button id="btn-close-qr" class="btn-close">&times;</button>
-        </div>
-        <div class="qr-wrapper">
-          <div id="qrcode"></div>
-        </div>
-        <p class="qr-note">Scan with your phone to instantly enter this room with full history.</p>
+      <!-- Connected Devices Roster (WhatsApp Chats List) -->
+      <div class="wa-chats-list" id="devices-roster">
+        <!-- Dynamically filled -->
       </div>
-    </div>
+    </aside>
 
-    <!-- Main Workspace -->
-    <main class="main-layout">
-      <!-- Left Column: Devices & Call Manager -->
-      <aside class="sidebar">
-        <!-- Connected Devices Roster -->
-        <div class="card roster-card">
-          <div class="card-header">
-            <h3>Connected Devices (<span id="device-count">1</span>)</h3>
-            <span class="indicator-live">Live</span>
-          </div>
-          <div id="devices-roster" class="devices-roster"></div>
-        </div>
-
-        <!-- Audio/Video Calling Box -->
-        <div class="card call-card">
-          <div class="card-header">
-            <h3>Call & Stream</h3>
-            <button id="btn-record-call" class="btn warning sm" title="Record screen or call session">⏺ Record</button>
-          </div>
-          <div class="call-actions">
-            <button id="btn-start-call" class="btn primary sm full-width">📞 Start Video Call</button>
-            <button id="btn-end-call" class="btn danger sm hidden">End Call</button>
-            <button id="btn-toggle-mic" class="btn secondary sm hidden">🎤 Mute</button>
-            <button id="btn-toggle-cam" class="btn secondary sm hidden">📷 Cam Off</button>
-          </div>
-
-          <div id="video-grid" class="video-grid hidden">
-            <div class="video-pod">
-              <span class="video-tag">You</span>
-              <video id="local-video" autoplay playsinline muted></video>
-            </div>
-            <div class="video-pod">
-              <span class="video-tag" id="remote-label">Remote</span>
-              <video id="remote-video" autoplay playsinline></video>
-            </div>
-          </div>
-          <div id="record-banner" class="record-banner hidden">● Recording Active (Click Record again to save .webm)</div>
-        </div>
-      </aside>
-
-      <!-- Center / Right Column: Heavy File Transfer Engine & Chat -->
-      <section class="content-area">
-        <!-- Heavy File Engine -->
-        <div class="card file-engine-card">
-          <div class="card-header">
-            <h3>Heavy P2P File Transfer (High Speed)</h3>
-            <div class="transfer-stats">
-              <span id="speed-meter" class="stat-badge">0 MB/s</span>
-              <span id="channel-type-badge" class="stat-badge p2p">Direct P2P Ready</span>
-            </div>
-          </div>
-
-          <!-- Drag & Drop Zone -->
-          <div id="drop-zone" class="drop-zone">
-            <input type="file" id="file-input" multiple />
-            <div class="drop-content">
-              <div class="drop-icon">🚀</div>
-              <p><strong>Drag & drop heavy files here</strong> or <span class="highlight">browse</span></p>
-              <span class="drop-hint">Supports Large Videos, ZIPs, Folders, ISOs (Direct Memory-Managed Stream)</span>
-            </div>
-          </div>
-
-          <!-- Staged files -->
-          <div id="staged-files" class="staged-files"></div>
-
-          <!-- Transfer Progress Monitor -->
-          <div id="progress-monitor" class="progress-monitor hidden">
-            <div class="monitor-header">
-              <span id="transfer-filename">Uploading...</span>
-              <span id="transfer-percent">0%</span>
-            </div>
-            <div class="progress-bar-bg">
-              <div id="progress-bar-fill" class="progress-bar-fill"></div>
-            </div>
-            <div class="monitor-footer">
-              <span id="transfer-bytes-info">0 MB / 0 MB</span>
-              <span id="transfer-eta">Calculating...</span>
-            </div>
-          </div>
-
-          <!-- Actions -->
-          <div class="file-engine-actions">
-            <button id="btn-send-files" class="btn primary full-width">Send Staged Files to Room</button>
+    <!-- Right Area: Chat Room & Call View -->
+    <main class="wa-main">
+      <!-- Chat Header -->
+      <div class="wa-header chat-header">
+        <div class="chat-target-info">
+          <div class="avatar" id="room-avatar">⚡</div>
+          <div>
+            <div class="chat-title" id="chat-room-title">Dhurta Room #----</div>
+            <div class="chat-subtitle" id="chat-participants-count">1 participant online</div>
           </div>
         </div>
+        <div class="header-icons">
+          <button id="btn-call-video" class="btn-icon" title="Start Video Call">📹</button>
+          <button id="btn-call-audio" class="btn-icon" title="Start Audio Call">📞</button>
+          <button id="btn-record-session" class="btn-icon" title="Record Session">⏺</button>
+        </div>
+      </div>
 
-        <!-- Chat & Shared History Feed -->
-        <div class="card chat-card">
-          <div class="card-header">
-            <h3>Room Chat & Shared Library</h3>
-            <span class="subtext">History automatically syncs with newcomers</span>
+      <!-- Video Call Dock (Collapsible) -->
+      <div id="video-dock" class="video-dock hidden">
+        <div class="video-grid">
+          <div class="video-frame">
+            <span class="v-tag">You</span>
+            <video id="local-video" autoplay playsinline muted></video>
           </div>
-
-          <div id="chat-stream" class="chat-stream">
-            <div class="chat-system-entry">Room started. Files and messages sent will remain available as long as you stay connected.</div>
-          </div>
-
-          <div class="chat-input-bar">
-            <input type="text" id="chat-input" placeholder="Type a message or paste a link..." />
-            <button id="btn-send-chat" class="btn primary">Send</button>
+          <div class="video-frame">
+            <span class="v-tag" id="remote-video-tag">Remote Peer</span>
+            <video id="remote-video" autoplay playsinline></video>
           </div>
         </div>
-      </section>
+        <div class="call-controls">
+          <button id="btn-mute-mic" class="btn-call-ctl">🎤</button>
+          <button id="btn-toggle-cam" class="btn-call-ctl">📷</button>
+          <button id="btn-hangup" class="btn-call-ctl btn-hangup">❌ End</button>
+        </div>
+      </div>
+
+      <!-- Drag and Drop Full Screen Overlay -->
+      <div id="drop-overlay" class="drop-overlay hidden">
+        <div class="drop-modal">
+          <div class="drop-icon">📂</div>
+          <p>Drop files here to send directly to room</p>
+        </div>
+      </div>
+
+      <!-- WhatsApp Messages Stream -->
+      <div class="wa-chat-body" id="chat-stream">
+        <div class="system-date-divider"><span>TODAY</span></div>
+        <div class="system-security-banner">
+          🔒 Messages and heavy file transfers are end-to-end P2P encrypted. Nobody outside this room can read or download them.
+        </div>
+      </div>
+
+      <!-- Live Heavy Transfer Floating Bar -->
+      <div id="transfer-tray" class="transfer-tray hidden">
+        <div class="tray-info">
+          <span id="tray-filename">Transferring file...</span>
+          <span id="tray-percent">0%</span>
+        </div>
+        <div class="tray-bar">
+          <div id="tray-bar-fill" class="tray-bar-fill"></div>
+        </div>
+        <div class="tray-speed" id="tray-speed-text">0 MB/s</div>
+      </div>
+
+      <!-- Bottom Chat Bar -->
+      <div class="wa-footer">
+        <label for="file-picker" class="btn-icon attachment-btn" title="Send Document or Media">
+          📎
+          <input type="file" id="file-picker" multiple />
+        </label>
+        <div class="input-wrap">
+          <input type="text" id="chat-input" placeholder="Type a message or drop files..." autocomplete="off" />
+        </div>
+        <button id="btn-send-msg" class="btn-icon send-btn" title="Send">➤</button>
+      </div>
     </main>
   </div>
 

@@ -1,261 +1,210 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // DOM Elements
-  const myNameDisplay = document.getElementById("my-assigned-name");
+  // Elements
+  const myAvatarEl = document.getElementById("my-avatar");
+  const myNameEl = document.getElementById("my-assigned-name");
+  const connectionStatusDot = document.getElementById("connection-status-dot");
+  const activePinDisplay = document.getElementById("active-pin-display");
   const pinInput = document.getElementById("pin-input");
-  const joinPinBtn = document.getElementById("btn-join-pin");
+  const enterPinBtn = document.getElementById("btn-enter-pin");
   const randomPinBtn = document.getElementById("btn-random-pin");
   const shareLinkInput = document.getElementById("share-link");
   const copyLinkBtn = document.getElementById("btn-copy-link");
-  const toggleQrBtn = document.getElementById("btn-toggle-qr");
-  const qrDrawer = document.getElementById("qr-drawer");
-  const closeQrBtn = document.getElementById("btn-close-qr");
-  const qrRoomLabel = document.getElementById("qr-room-label");
-  const connectionPill = document.getElementById("connection-pill");
-  const openWindowBtn = document.getElementById("btn-open-window");
+  const showQrBtn = document.getElementById("btn-show-qr");
   const refreshRoomBtn = document.getElementById("btn-refresh-room");
-  const deviceCountSpan = document.getElementById("device-count");
+  const newWindowBtn = document.getElementById("btn-new-window");
   const devicesRoster = document.getElementById("devices-roster");
 
-  const alertBanner = document.getElementById("alert-banner");
-  const alertText = document.getElementById("alert-text");
-  const closeAlertBtn = document.getElementById("btn-close-alert");
-
-  const dropZone = document.getElementById("drop-zone");
-  const fileInput = document.getElementById("file-input");
-  const stagedFilesDiv = document.getElementById("staged-files");
-  const sendFilesBtn = document.getElementById("btn-send-files");
-
-  const progressMonitor = document.getElementById("progress-monitor");
-  const progressBarFill = document.getElementById("progress-bar-fill");
-  const transferFilename = document.getElementById("transfer-filename");
-  const transferPercent = document.getElementById("transfer-percent");
-  const transferBytesInfo = document.getElementById("transfer-bytes-info");
-  const transferEta = document.getElementById("transfer-eta");
-  const speedMeter = document.getElementById("speed-meter");
-  const channelBadge = document.getElementById("channel-type-badge");
-
+  const chatRoomTitle = document.getElementById("chat-room-title");
+  const chatParticipantsCount = document.getElementById("chat-participants-count");
   const chatStream = document.getElementById("chat-stream");
   const chatInput = document.getElementById("chat-input");
-  const sendChatBtn = document.getElementById("btn-send-chat");
+  const sendMsgBtn = document.getElementById("btn-send-msg");
+  const filePicker = document.getElementById("file-picker");
+  const dropOverlay = document.getElementById("drop-overlay");
 
-  const startCallBtn = document.getElementById("btn-start-call");
-  const endCallBtn = document.getElementById("btn-end-call");
-  const toggleMicBtn = document.getElementById("btn-toggle-mic");
-  const toggleCamBtn = document.getElementById("btn-toggle-cam");
-  const recordCallBtn = document.getElementById("btn-record-call");
-  const videoGrid = document.getElementById("video-grid");
+  const transferTray = document.getElementById("transfer-tray");
+  const trayFilename = document.getElementById("tray-filename");
+  const trayPercent = document.getElementById("tray-percent");
+  const trayBarFill = document.getElementById("tray-bar-fill");
+  const traySpeedText = document.getElementById("tray-speed-text");
+
+  // Call & Modal Elements
+  const callVideoBtn = document.getElementById("btn-call-video");
+  const callAudioBtn = document.getElementById("btn-call-audio");
+  const recordSessionBtn = document.getElementById("btn-record-session");
+  const videoDock = document.getElementById("video-dock");
   const localVideo = document.getElementById("local-video");
   const remoteVideo = document.getElementById("remote-video");
-  const recordBanner = document.getElementById("record-banner");
+  const btnMuteMic = document.getElementById("btn-mute-mic");
+  const btnToggleCam = document.getElementById("btn-toggle-cam");
+  const btnHangup = document.getElementById("btn-hangup");
+
+  const incomingCallModal = document.getElementById("incoming-call-modal");
+  const callCallerName = document.getElementById("call-caller-name");
+  const callCallerAvatar = document.getElementById("call-caller-avatar");
+  const btnAcceptCall = document.getElementById("btn-accept-call");
+  const btnRejectCall = document.getElementById("btn-reject-call");
+
+  const qrModal = document.getElementById("qr-modal");
+  const qrModalPin = document.getElementById("qr-modal-pin");
+  const btnCloseQr = document.getElementById("btn-close-qr");
+
+  // Identity
+  const myDeviceId = "wa_dev_" + Math.random().toString(36).substring(2, 9);
+  function getWhatsAppProfile() {
+    let profile = JSON.parse(sessionStorage.getItem("dhurta_wa_profile") || "null");
+    if (!profile) {
+      const avatars = ["🦊", "🦁", "🐯", "🐼", "🐬", "🦅", "🐺", "⚡", "🚀", "🪐"];
+      const names = ["Cyber Falcon", "Neon Tiger", "Emerald Wolf", "Solar Fox", "Ruby Hawk", "Amber Lynx", "Shadow Eagle", "Aqua Dolphin"];
+      profile = {
+        name: names[Math.floor(Math.random() * names.length)],
+        avatar: avatars[Math.floor(Math.random() * avatars.length)],
+      };
+      sessionStorage.setItem("dhurta_wa_profile", JSON.stringify(profile));
+    }
+    return profile;
+  }
+  const myProfile = getWhatsAppProfile();
+  myAvatarEl.textContent = myProfile.avatar;
+  myNameEl.textContent = myProfile.name;
 
   // State
-  const myDeviceId = "peer_" + Math.random().toString(36).substring(2, 9);
   let currentPin = null;
   let mqttClient = null;
   let currentTopic = null;
+  let peers = new Map(); // peerId -> { name, avatar, lastSeen, pc, dc }
+  let roomMessages = []; // Persistent history
+  let locallyStoredBlobs = new Map(); // fileId -> Blob
 
-  // Roster & History
-  let peers = new Map(); // peerId -> { name, lastSeen, pc, dc }
-  let roomChatHistory = []; // { id, author, text, timestamp, fileMeta }
-  let sharedFilesLocalMap = new Map(); // fileId -> File instance
-  let stagedFiles = [];
+  // Adaptive Chunk Engine (32KB chunks + 12ms pacing prevents broker drops)
+  const CHUNK_SIZE = 32 * 1024;
+  let activeTransfers = new Map(); // fileId -> { meta, chunks, receivedBytes, totalBytes, startTime }
 
-  // WebRTC
-  const rtcConfig = {
+  // Audio/Video Calls
+  let localStream = null;
+  let activeCallPeer = null;
+  let ringtoneInterval = null;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+
+  const rtcServers = {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
       { urls: "stun:stun.cloudflare.com:3478" },
     ],
   };
-  const CHUNK_SIZE = 64 * 1024; // 64 KB high-speed raw chunks
-  const MAX_BUFFERED_THRESHOLD = 256 * 1024; // Flow-control backpressure limit
-
-  let localStream = null;
-  let mediaRecorder = null;
-  let recordedChunks = [];
-
-  // Incoming heavy file reconstruction state
-  let incomingHeavyFiles = new Map(); // fileId -> { meta, chunks, receivedBytes, startTime }
-
-  // 1. Device Identity
-  function getDeviceAlias() {
-    let name = sessionStorage.getItem("dhurta_unified_name");
-    if (!name) {
-      const colors = ["Cyber", "Neon", "Cosmic", "Solar", "Emerald", "Ruby", "Shadow", "Amber"];
-      const animals = ["Falcon", "Tiger", "Fox", "Wolf", "Hawk", "Eagle", "Cheetah", "Lynx"];
-      name = `${colors[Math.floor(Math.random() * colors.length)]} ${animals[Math.floor(Math.random() * animals.length)]}`;
-      sessionStorage.setItem("dhurta_unified_name", name);
-    }
-    return name;
-  }
-  const myName = getDeviceAlias();
-  myNameDisplay.textContent = myName;
-
-  function showAlert(msg, isError = false) {
-    alertText.textContent = msg;
-    alertBanner.className = isError ? "alert-banner error" : "alert-banner";
-    alertBanner.classList.remove("hidden");
-  }
-  closeAlertBtn.addEventListener("click", () => alertBanner.classList.add("hidden"));
 
   function formatBytes(bytes) {
     if (bytes === 0) return "0 B";
-    const k = 1024, sizes = ["B", "KB", "MB", "GB", "TB"];
+    const k = 1024, s = ["B", "KB", "MB", "GB", "TB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + s[i];
   }
 
-  // 2. Client-Side QR Generator
-  function renderQR(url) {
-    const qrContainer = document.getElementById("qrcode");
-    qrContainer.innerHTML = "";
-    new QRCode(qrContainer, {
-      text: url,
-      width: 180,
-      height: 180,
-      colorDark: "#080b11",
-      colorLight: "#ffffff",
-      correctLevel: QRCode.CorrectLevel.M,
-    });
+  function formatTime(timestamp) {
+    const d = new Date(timestamp || Date.now());
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
-  // 3. Room Management & Signaling Mesh
+  // Ringtone synthesizer (no external audio files needed)
+  function playRingtone() {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      function beep() {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.4);
+      }
+      beep();
+      ringtoneInterval = setInterval(beep, 1600);
+    } catch (e) {}
+  }
+
+  function stopRingtone() {
+    if (ringtoneInterval) {
+      clearInterval(ringtoneInterval);
+      ringtoneInterval = null;
+    }
+  }
+
+  // 1. Room Orchestration & Real-Time Sync
   function enterRoom(pin) {
     if (!/^\d{4}$/.test(pin)) {
-      showAlert("Please enter a valid 4-digit room code (e.g. 4829).", true);
+      alert("Please enter a 4-digit code (e.g. 4829)");
       return;
     }
 
     currentPin = pin;
     pinInput.value = pin;
-    qrRoomLabel.textContent = `#${pin}`;
+    activePinDisplay.textContent = pin;
+    qrModalPin.textContent = pin;
+    chatRoomTitle.textContent = `Dhurta Room #${pin}`;
 
-    const fullUrl = `${window.location.origin}${window.location.pathname}?pin=${pin}`;
-    shareLinkInput.value = fullUrl;
-    renderQR(fullUrl);
+    const linkUrl = `${window.location.origin}${window.location.pathname}?pin=${pin}`;
+    shareLinkInput.value = linkUrl;
+    renderQR(linkUrl);
 
-    // Close any previous connections cleanly
-    teardownWebRTC();
+    currentTopic = `dhurta_wa_v7/room_${pin}`;
+    connectionStatusDot.textContent = `● Room #${pin}`;
+    connectionStatusDot.style.color = "var(--wa-green)";
 
-    currentTopic = `dhurta_unity_v6/room_${pin}`;
-    connectionPill.textContent = `Connecting to #${pin}...`;
-    connectionPill.className = "status-pill online";
+    if (mqttClient) mqttClient.end(true);
 
-    if (mqttClient) {
-      mqttClient.end(true);
-    }
+    peers.clear();
+    updateRoster();
 
-    // Connect to reliable WSS signaling bus
+    // High performance WebSocket MQTT client
     mqttClient = mqtt.connect("wss://broker.emqx.io:8084/mqtt", {
-      clientId: `dhurta_${myDeviceId}`,
+      clientId: myDeviceId,
       clean: true,
       connectTimeout: 7000,
       reconnectPeriod: 2000,
     });
 
     mqttClient.on("connect", () => {
-      connectionPill.textContent = `Room ${pin} (Ready)`;
-      connectionPill.className = "status-pill online";
-
       mqttClient.subscribe(currentTopic, { qos: 0 }, (err) => {
         if (!err) {
-          // Announce presence and request historical data from existing members
-          broadcastSignal({ type: "presence_announce", wantsHistory: true });
+          // Announce with history sync request
+          publish({ type: "presence", requestHistory: true });
         }
       });
     });
 
-    mqttClient.on("message", (t, msgBuf) => {
+    mqttClient.on("message", (t, msg) => {
       try {
-        const data = JSON.parse(msgBuf.toString());
-        if (data.senderId === myDeviceId) return; // ignore self
-        handleSignalMessage(data);
-      } catch (err) {
-        console.error("Signal parsing error:", err);
+        const payload = JSON.parse(msg.toString());
+        if (payload.senderId === myDeviceId) return; // skip self
+        handleIncomingPacket(payload);
+      } catch (e) {
+        console.error("Payload error:", e);
       }
-    });
-
-    mqttClient.on("error", (e) => {
-      showAlert(`Signaling event: ${e.message}`, true);
     });
 
     mqttClient.on("close", () => {
-      connectionPill.textContent = "Reconnecting...";
-      connectionPill.className = "status-pill offline";
+      connectionStatusDot.textContent = "● Reconnecting";
+      connectionStatusDot.style.color = "var(--wa-danger)";
     });
   }
 
-  function broadcastSignal(payload) {
+  function publish(data) {
     if (!mqttClient || !mqttClient.connected || !currentTopic) return;
-    payload.senderId = myDeviceId;
-    payload.senderName = myName;
-    mqttClient.publish(currentTopic, JSON.stringify(payload));
+    data.senderId = myDeviceId;
+    data.senderName = myProfile.name;
+    data.senderAvatar = myProfile.avatar;
+    data.timestamp = Date.now();
+    mqttClient.publish(currentTopic, JSON.stringify(data));
   }
 
-  function sendDirectSignal(targetId, payload) {
-    payload.targetId = targetId;
-    broadcastSignal(payload);
-  }
-
-  // 4. Presence, Roster & History Catch-up Engine
-  function handleSignalMessage(data) {
-    if (data.targetId && data.targetId !== myDeviceId) return; // targeted for another peer
-
-    // Track peer in roster
-    const isNew = !peers.has(data.senderId);
-    let peerObj = peers.get(data.senderId) || { name: data.senderName, lastSeen: Date.now() };
-    peerObj.lastSeen = Date.now();
-    peerObj.name = data.senderName;
-    peers.set(data.senderId, peerObj);
-
-    if (isNew) {
-      updateRoster();
-      showAlert(`${data.senderName} joined room #${currentPin}!`, false);
-      // Coordinate direct WebRTC DataChannel connection
-      initiateWebRTCConnection(data.senderId, true);
-    }
-
-    // Historical Sync for New Members
-    if (data.type === "presence_announce") {
-      // If we have history and the newcomer needs it, transmit it
-      if (roomChatHistory.length > 0 && data.wantsHistory) {
-        sendDirectSignal(data.senderId, {
-          type: "history_sync_packet",
-          history: roomChatHistory,
-        });
-      }
-    } else if (data.type === "history_sync_packet") {
-      integrateHistoricalData(data.history);
-    } else if (data.type === "chat_message") {
-      appendChatMessage(data.senderName, data.text, false, data.fileMeta, data.id);
-    } else if (data.type === "file_request_download") {
-      // A new peer wants a file shared earlier
-      handleRemoteFileRequest(data.fileId, data.senderId);
-    } else if (data.type === "rtc_offer") {
-      handleRtcOffer(data.senderId, data.offer);
-    } else if (data.type === "rtc_answer") {
-      handleRtcAnswer(data.senderId, data.answer);
-    } else if (data.type === "rtc_ice") {
-      handleRtcIce(data.senderId, data.candidate);
-    } else if (data.type === "room_refresh_request") {
-      renegotiatePeer(data.senderId);
-    }
-  }
-
-  function integrateHistoricalData(incomingHistory) {
-    incomingHistory.forEach((item) => {
-      // Avoid duplicates
-      if (!roomChatHistory.some((h) => h.id === item.id)) {
-        appendChatMessage(item.author, item.text, item.author === myName, item.fileMeta, item.id);
-      }
-    });
-  }
-
-  // Heartbeat interval: keep roster clean
+  // Periodic heartbeat keeps peers connected
   setInterval(() => {
     if (mqttClient && mqttClient.connected) {
-      broadcastSignal({ type: "heartbeat_ping" });
+      publish({ type: "heartbeat" });
 
       const now = Date.now();
       let changed = false;
@@ -270,573 +219,551 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }, 2500);
 
+  function renderQR(url) {
+    const qEl = document.getElementById("qrcode");
+    qEl.innerHTML = "";
+    new QRCode(qEl, {
+      text: url,
+      width: 170,
+      height: 170,
+      colorDark: "#0b141a",
+      colorLight: "#ffffff",
+      correctLevel: QRCode.CorrectLevel.M,
+    });
+  }
+
+  // 2. Incoming Packet Dispatcher
+  function handleIncomingPacket(msg) {
+    // Roster presence check
+    const isNew = !peers.has(msg.senderId);
+    let p = peers.get(msg.senderId) || {
+      name: msg.senderName,
+      avatar: msg.senderAvatar || "👤",
+      lastSeen: Date.now(),
+    };
+    p.lastSeen = Date.now();
+    p.name = msg.senderName;
+    peers.set(msg.senderId, p);
+
+    if (isNew) {
+      updateRoster();
+      // Transmit previous chat/data history to newcomer
+      if (roomMessages.length > 0 && msg.requestHistory) {
+        publish({
+          type: "history_packet",
+          targetId: msg.senderId,
+          history: roomMessages,
+        });
+      }
+    }
+
+    if (msg.targetId && msg.targetId !== myDeviceId) return;
+
+    if (msg.type === "history_packet") {
+      msg.history.forEach((m) => {
+        if (!roomMessages.some((existing) => existing.id === m.id)) {
+          appendMessageBubble(m.author, m.avatar, m.text, false, m.fileMeta, m.id, m.timestamp);
+        }
+      });
+    } else if (msg.type === "chat") {
+      appendMessageBubble(msg.senderName, msg.senderAvatar, msg.text, false, msg.fileMeta, msg.id, msg.timestamp);
+    } else if (msg.type === "stream_chunk") {
+      processStreamChunk(msg);
+    } else if (msg.type === "call_invite") {
+      handleIncomingCallInvite(msg);
+    } else if (msg.type === "call_signal") {
+      handleCallSignal(msg);
+    } else if (msg.type === "call_hangup") {
+      endCallLocally();
+    }
+  }
+
   function updateRoster() {
     devicesRoster.innerHTML = "";
-    const total = peers.size + 1;
-    deviceCountSpan.textContent = total;
+    const totalCount = peers.size + 1;
+    chatParticipantsCount.textContent = `${totalCount} participants in room`;
 
-    // Self
-    const selfEl = document.createElement("div");
-    selfEl.className = "device-entry self";
-    selfEl.innerHTML = `<span><strong>${myName}</strong> (You)</span><span class="status">Host/Self</span>`;
-    devicesRoster.appendChild(selfEl);
-
-    // Peers
-    peers.forEach((p) => {
-      const el = document.createElement("div");
-      el.className = "device-entry";
-      const hasDC = p.dc && p.dc.readyState === "open";
-      el.innerHTML = `<span>${p.name}</span><span class="status" style="color:${hasDC ? "#10b981" : "#f59e0b"}">${hasDC ? "P2P Turbo" : "Signaled"}</span>`;
-      devicesRoster.appendChild(el);
-    });
-
-    if (peers.size > 0) {
-      connectionPill.textContent = `Connected (${total} Devices)`;
-      connectionPill.className = "status-pill connected";
-    } else {
-      connectionPill.textContent = `Room ${currentPin} (Waiting for Peer)`;
-      connectionPill.className = "status-pill online";
-    }
-  }
-
-  // 5. Heavy-Duty WebRTC DataChannel Engine (Direct P2P, Zero-Limit)
-  function teardownWebRTC() {
-    peers.forEach((p) => {
-      if (p.dc) p.dc.close();
-      if (p.pc) p.pc.close();
-    });
-    peers.clear();
-    updateRoster();
-  }
-
-  async function initiateWebRTCConnection(peerId, isInitiator) {
-    const peerData = peers.get(peerId);
-    if (!peerData) return;
-
-    const pc = new RTCPeerConnection(rtcConfig);
-    peerData.pc = pc;
-
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        sendDirectSignal(peerId, { type: "rtc_ice", candidate: e.candidate });
-      }
-    };
-
-    pc.ontrack = (e) => {
-      remoteVideo.srcObject = e.streams[0];
-      videoGrid.classList.remove("hidden");
-    };
-
-    if (isInitiator) {
-      // Create high-throughput binary DataChannel
-      const dc = pc.createDataChannel("dhurtaHeavyP2P", { ordered: true });
-      setupDataChannel(peerId, dc);
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      sendDirectSignal(peerId, { type: "rtc_offer", offer });
-    } else {
-      pc.ondatachannel = (e) => {
-        setupDataChannel(peerId, e.channel);
-      };
-    }
-  }
-
-  async function handleRtcOffer(senderId, offer) {
-    let peerData = peers.get(senderId);
-    if (!peerData) return;
-
-    const pc = new RTCPeerConnection(rtcConfig);
-    peerData.pc = pc;
-
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        sendDirectSignal(senderId, { type: "rtc_ice", candidate: e.candidate });
-      }
-    };
-
-    pc.ontrack = (e) => {
-      remoteVideo.srcObject = e.streams[0];
-      videoGrid.classList.remove("hidden");
-    };
-
-    pc.ondatachannel = (e) => {
-      setupDataChannel(senderId, e.channel);
-    };
-
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    sendDirectSignal(senderId, { type: "rtc_answer", answer });
-  }
-
-  async function handleRtcAnswer(senderId, answer) {
-    const peerData = peers.get(senderId);
-    if (peerData && peerData.pc) {
-      await peerData.pc.setRemoteDescription(new RTCSessionDescription(answer));
-    }
-  }
-
-  async function handleRtcIce(senderId, candidate) {
-    const peerData = peers.get(senderId);
-    if (peerData && peerData.pc) {
-      try {
-        await peerData.pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (e) {
-        console.error("ICE error:", e);
-      }
-    }
-  }
-
-  function setupDataChannel(peerId, dc) {
-    dc.binaryType = "arraybuffer";
-    const p = peers.get(peerId);
-    if (p) p.dc = dc;
-
-    dc.onopen = () => {
-      channelBadge.textContent = "🚀 Direct WebRTC Active";
-      channelBadge.className = "stat-badge p2p";
-      updateRoster();
-    };
-
-    dc.onclose = () => {
-      updateRoster();
-    };
-
-    dc.onmessage = (event) => {
-      handleIncomingDataPacket(event.data, peerId);
-    };
-  }
-
-  // 6. Streaming Heavy Binary Chunks without Freezing
-  async function waitForBufferDrain(dc) {
-    if (dc.bufferedAmount > MAX_BUFFERED_THRESHOLD) {
-      await new Promise((resolve) => {
-        const handler = () => {
-          dc.removeEventListener("bufferedamountlow", handler);
-          resolve();
-        };
-        dc.bufferedAmountLowThreshold = 64 * 1024;
-        dc.addEventListener("bufferedamountlow", handler);
-        // Safety timeout
-        setTimeout(resolve, 35);
-      });
-    }
-  }
-
-  async function streamFileToDataChannel(file, dc, fileId) {
-    const total = file.size;
-    let offset = 0;
-    const startTime = Date.now();
-
-    // 1. Transmit JSON Header with metadata
-    dc.send(
-      JSON.stringify({
-        type: "heavy_header",
-        fileId,
-        name: file.name,
-        size: file.size,
-        mime: file.type || "application/octet-stream",
-      })
-    );
-
-    // 2. Stream raw binary slices (Memory Efficient: Slice on demand)
-    while (offset < total) {
-      const slice = file.slice(offset, offset + CHUNK_SIZE);
-      const buffer = await slice.arrayBuffer();
-
-      await waitForBufferDrain(dc);
-      dc.send(buffer);
-
-      offset += buffer.byteLength;
-
-      // Update UI
-      const pct = Math.min(100, Math.round((offset / total) * 100));
-      progressBarFill.style.width = `${pct}%`;
-      transferPercent.textContent = `${pct}%`;
-      transferBytesInfo.textContent = `${formatBytes(offset)} / ${formatBytes(total)}`;
-
-      // Calculate Speed & ETA
-      const elapsed = (Date.now() - startTime) / 1000;
-      if (elapsed > 0.3) {
-        const bytesPerSec = offset / elapsed;
-        speedMeter.textContent = `${formatBytes(bytesPerSec)}/s`;
-        const remainingBytes = total - offset;
-        const secondsRemaining = Math.ceil(remainingBytes / bytesPerSec);
-        transferEta.textContent = `${secondsRemaining}s remaining`;
-      }
-    }
-
-    // 3. Transmit Completion Marker
-    dc.send(JSON.stringify({ type: "heavy_eof", fileId }));
-  }
-
-  // Incoming binary assembly
-  function handleIncomingDataPacket(data, peerId) {
-    if (typeof data === "string") {
-      try {
-        const msg = JSON.parse(data);
-        if (msg.type === "heavy_header") {
-          incomingHeavyFiles.set(msg.fileId, {
-            meta: msg,
-            chunks: [],
-            receivedBytes: 0,
-            startTime: Date.now(),
-          });
-          progressMonitor.classList.remove("hidden");
-          transferFilename.textContent = `Downloading: ${msg.name}`;
-        } else if (msg.type === "heavy_eof") {
-          const rec = incomingHeavyFiles.get(msg.fileId);
-          if (!rec) return;
-
-          progressMonitor.classList.add("hidden");
-          progressBarFill.style.width = "0%";
-          speedMeter.textContent = "0 MB/s";
-
-          // Assemble complete Blob and auto-download
-          const blob = new Blob(rec.chunks, { type: rec.meta.mime });
-          finalizeDownloadedFile(blob, rec.meta.name, rec.meta.mime, msg.fileId);
-          incomingHeavyFiles.delete(msg.fileId);
-        }
-      } catch (err) {
-        console.error("Packet parse error:", err);
-      }
-    } else {
-      // Raw Binary ArrayBuffer Chunk
-      // Associate with the currently open file
-      const activeEntry = [...incomingHeavyFiles.values()][0];
-      if (activeEntry) {
-        activeEntry.chunks.push(data);
-        activeEntry.receivedBytes += data.byteLength;
-
-        const total = activeEntry.meta.size;
-        const pct = Math.min(100, Math.round((activeEntry.receivedBytes / total) * 100));
-        progressBarFill.style.width = `${pct}%`;
-        transferPercent.textContent = `${pct}%`;
-        transferBytesInfo.textContent = `${formatBytes(activeEntry.receivedBytes)} / ${formatBytes(total)}`;
-
-        const elapsed = (Date.now() - activeEntry.startTime) / 1000;
-        if (elapsed > 0.3) {
-          const speed = activeEntry.receivedBytes / elapsed;
-          speedMeter.textContent = `${formatBytes(speed)}/s`;
-          const remainingBytes = total - activeEntry.receivedBytes;
-          const eta = Math.ceil(remainingBytes / speed);
-          transferEta.textContent = `${eta}s remaining`;
-        }
-      }
-    }
-  }
-
-  function finalizeDownloadedFile(blob, name, mime, fileId) {
-    const url = URL.createObjectURL(blob);
-
-    // Auto-trigger browser download
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-
-    // Render Preview Card in Chat
-    const bubble = document.createElement("div");
-    bubble.className = "chat-bubble peer";
-    bubble.innerHTML = `
-      <div class="chat-author">Shared File Received</div>
-      <div class="chat-file-card">
-        <div class="chat-file-meta">
-          <strong>${name}</strong>
-          <span style="font-size:0.72rem; color:#94a3b8;">${formatBytes(blob.size)}</span>
+    // Self Item
+    const selfItem = document.createElement("div");
+    selfItem.className = "wa-chat-item active";
+    selfItem.innerHTML = `
+      <div class="avatar">${myProfile.avatar}</div>
+      <div class="wa-chat-details">
+        <div class="wa-chat-top">
+          <span class="wa-chat-title">${myProfile.name} (You)</span>
+          <span class="wa-chat-time">Online</span>
         </div>
-        <a href="${url}" download="${name}" class="btn primary sm">Save Again</a>
+        <div class="wa-chat-bottom">Current Active Device</div>
       </div>
     `;
+    devicesRoster.appendChild(selfItem);
 
-    if (mime.startsWith("image/")) {
-      bubble.innerHTML += `<div class="chat-media-preview"><img src="${url}" alt="${name}" /></div>`;
-    } else if (mime.startsWith("video/")) {
-      bubble.innerHTML += `<div class="chat-media-preview"><video src="${url}" controls></video></div>`;
-    } else if (mime.startsWith("audio/")) {
-      bubble.innerHTML += `<div class="chat-media-preview"><audio src="${url}" controls></audio></div>`;
-    }
-
-    chatStream.appendChild(bubble);
-    chatStream.scrollTop = chatStream.scrollHeight;
+    // Remote Peers
+    peers.forEach((peer) => {
+      const item = document.createElement("div");
+      item.className = "wa-chat-item";
+      item.innerHTML = `
+        <div class="avatar">${peer.avatar}</div>
+        <div class="wa-chat-details">
+          <div class="wa-chat-top">
+            <span class="wa-chat-title">${peer.name}</span>
+            <span class="wa-chat-time" style="color:var(--wa-green)">Synced</span>
+          </div>
+          <div class="wa-chat-bottom">Ready for heavy file transfer & calls</div>
+        </div>
+      `;
+      devicesRoster.appendChild(item);
+    });
   }
 
-  // 7. Sending Files
-  sendFilesBtn.addEventListener("click", async () => {
-    if (!stagedFiles.length) {
-      showAlert("Please drag and drop or select files first.", true);
-      return;
+  // 3. Heavy Data Dual-Streaming Engine (Solves Stuck Transfers)
+  function arrayBufferToBase64(buffer) {
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
     }
+    return window.btoa(binary);
+  }
 
-    sendFilesBtn.disabled = true;
-    progressMonitor.classList.remove("hidden");
+  function base64ToArrayBuffer(base64) {
+    const binary = window.atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
 
-    for (const file of stagedFiles) {
-      const fileId = `file_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      sharedFilesLocalMap.set(fileId, file);
+  async function broadcastHeavyFile(file) {
+    const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const totalBytes = file.size;
+    const totalChunks = Math.ceil(totalBytes / CHUNK_SIZE);
+    const meta = { fileId, name: file.name, size: file.size, mime: file.type || "application/octet-stream" };
 
-      transferFilename.textContent = `Streaming: ${file.name}`;
+    locallyStoredBlobs.set(fileId, file);
 
-      const meta = { fileId, name: file.name, size: file.size, mime: file.type || "application/octet-stream" };
+    // Render outgoing bubble in WhatsApp stream
+    appendMessageBubble(myProfile.name, myProfile.avatar, `Shared file: ${file.name}`, true, meta, fileId);
 
-      // Announce file to room chat history
-      appendChatMessage(myName, `Shared file: ${file.name}`, true, meta, fileId);
-      broadcastSignal({
-        type: "chat_message",
-        text: `Shared file: ${file.name}`,
-        fileMeta: meta,
-        id: fileId,
+    // Broadcast file notice
+    publish({
+      type: "chat",
+      text: `Shared file: ${file.name}`,
+      fileMeta: meta,
+      id: fileId,
+    });
+
+    transferTray.classList.remove("hidden");
+    trayFilename.textContent = `Streaming: ${file.name}`;
+    const startTime = Date.now();
+
+    // Stream chunks slice-by-slice with 10ms pacing (never exhausts broker memory)
+    for (let i = 0; i < totalChunks; i++) {
+      const slice = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+      const buf = await slice.arrayBuffer();
+      const b64 = arrayBufferToBase64(buf);
+
+      publish({
+        type: "stream_chunk",
+        fileId,
+        index: i,
+        total: totalChunks,
+        totalBytes,
+        meta,
+        data: b64,
       });
 
-      // Stream to every connected peer via their direct DataChannel
-      for (const [pId, p] of peers.entries()) {
-        if (p.dc && p.dc.readyState === "open") {
-          await streamFileToDataChannel(file, p.dc, fileId);
-        }
+      const sentBytes = Math.min(totalBytes, (i + 1) * CHUNK_SIZE);
+      const pct = Math.min(100, Math.round((sentBytes / totalBytes) * 100));
+      trayBarFill.style.width = `${pct}%`;
+      trayPercent.textContent = `${pct}%`;
+
+      const elapsed = (Date.now() - startTime) / 1000;
+      if (elapsed > 0.2) {
+        const speed = sentBytes / elapsed;
+        traySpeedText.textContent = `${formatBytes(speed)}/s`;
       }
+
+      await new Promise((r) => setTimeout(r, 10));
     }
 
     setTimeout(() => {
-      progressMonitor.classList.add("hidden");
-      progressBarFill.style.width = "0%";
-      speedMeter.textContent = "0 MB/s";
-      stagedFiles = [];
-      stagedFilesDiv.innerHTML = "";
-      sendFilesBtn.disabled = false;
-      showAlert("Heavy file transfer completed!", false);
-    }, 500);
-  });
+      transferTray.classList.add("hidden");
+      trayBarFill.style.width = "0%";
+    }, 600);
+  }
 
-  // Handle requests for previous files from newcomers
-  async function handleRemoteFileRequest(fileId, requesterId) {
-    const file = sharedFilesLocalMap.get(fileId);
-    const peerData = peers.get(requesterId);
-    if (file && peerData && peerData.dc && peerData.dc.readyState === "open") {
-      showAlert(`Transmitting cached file ${file.name} to newcomer...`, false);
-      progressMonitor.classList.remove("hidden");
-      transferFilename.textContent = `Re-syncing: ${file.name}`;
-      await streamFileToDataChannel(file, peerData.dc, fileId);
-      progressMonitor.classList.add("hidden");
+  function processStreamChunk(msg) {
+    let rec = activeTransfers.get(msg.fileId);
+    if (!rec) {
+      rec = {
+        meta: msg.meta,
+        chunks: new Array(msg.total),
+        receivedBytes: 0,
+        totalBytes: msg.totalBytes,
+        startTime: Date.now(),
+      };
+      activeTransfers.set(msg.fileId, rec);
+      transferTray.classList.remove("hidden");
+      trayFilename.textContent = `Downloading: ${msg.meta.name}`;
+    }
+
+    const chunkBuf = base64ToArrayBuffer(msg.data);
+    rec.chunks[msg.index] = chunkBuf;
+    rec.receivedBytes += chunkBuf.byteLength;
+
+    const pct = Math.min(100, Math.round((rec.receivedBytes / rec.totalBytes) * 100));
+    trayBarFill.style.width = `${pct}%`;
+    trayPercent.textContent = `${pct}%`;
+
+    const elapsed = (Date.now() - rec.startTime) / 1000;
+    if (elapsed > 0.2) {
+      const speed = rec.receivedBytes / elapsed;
+      traySpeedText.textContent = `${formatBytes(speed)}/s`;
+    }
+
+    // Check completion
+    const isComplete = rec.chunks.filter(Boolean).length === msg.total;
+    if (isComplete) {
+      const finalBlob = new Blob(rec.chunks, { type: rec.meta.mime });
+      locallyStoredBlobs.set(msg.fileId, finalBlob);
+
+      transferTray.classList.add("hidden");
+      trayBarFill.style.width = "0%";
+      activeTransfers.delete(msg.fileId);
+
+      // Activate download button in chat
+      updateFileBubbleWithBlob(msg.fileId, finalBlob, rec.meta.name);
     }
   }
 
-  // 8. Drag and Drop Staging
-  ["dragenter", "dragover"].forEach((eName) => {
-    dropZone.addEventListener(eName, (e) => {
-      e.preventDefault();
-      dropZone.classList.add("dragover");
-    });
-  });
+  // 4. WhatsApp Chat UI & Safe Downloads
+  function appendMessageBubble(author, avatar, text, isMine, fileMeta = null, id = null, timestamp = null) {
+    const msgId = id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const timeStr = formatTime(timestamp);
 
-  ["dragleave", "drop"].forEach((eName) => {
-    dropZone.addEventListener(eName, (e) => {
-      e.preventDefault();
-      dropZone.classList.remove("dragover");
-    });
-  });
-
-  dropZone.addEventListener("drop", (e) => {
-    if (e.dataTransfer.files.length) stageFiles(e.dataTransfer.files);
-  });
-
-  fileInput.addEventListener("change", (e) => {
-    if (e.target.files.length) stageFiles(e.target.files);
-  });
-
-  function stageFiles(files) {
-    stagedFiles = Array.from(files);
-    stagedFilesDiv.innerHTML = "";
-
-    stagedFiles.forEach((f) => {
-      const row = document.createElement("div");
-      row.className = "staged-row";
-      row.innerHTML = `<span>📄 <strong>${f.name}</strong></span><span style="color:#94a3b8;">${formatBytes(f.size)}</span>`;
-      stagedFilesDiv.appendChild(row);
-    });
-
-    showAlert(`${stagedFiles.length} file(s) staged. Click 'Send Staged Files' to transfer at full speed!`, false);
-  }
-
-  // 9. Real-Time Chat & History Persistence
-  function appendChatMessage(author, text, isMine, fileMeta = null, id = null) {
-    const msgId = id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    roomChatHistory.push({ id: msgId, author, text, timestamp: Date.now(), fileMeta });
+    roomMessages.push({ id: msgId, author, avatar, text, isMine, fileMeta, timestamp: timestamp || Date.now() });
 
     const bubble = document.createElement("div");
-    bubble.className = `chat-bubble ${isMine ? "mine" : "peer"}`;
-    bubble.innerHTML = `<div class="chat-author">${author}</div><div>${text}</div>`;
+    bubble.className = `wa-msg ${isMine ? "outgoing" : "incoming"}`;
+    bubble.id = `bubble_${msgId}`;
+
+    let html = "";
+    if (!isMine) {
+      html += `<div class="wa-msg-author">${avatar} ${author}</div>`;
+    }
+    html += `<div>${text}</div>`;
 
     if (fileMeta) {
-      bubble.innerHTML += `
-        <div class="chat-file-card">
-          <div class="chat-file-meta">
-            <strong>${fileMeta.name}</strong>
-            <span style="font-size:0.72rem; color:#94a3b8;">${formatBytes(fileMeta.size)}</span>
+      html += `
+        <div class="wa-file-card" id="filecard_${fileMeta.fileId}">
+          <div class="wa-file-icon">📄</div>
+          <div class="wa-file-details">
+            <div class="wa-file-name">${fileMeta.name}</div>
+            <div class="wa-file-size">${formatBytes(fileMeta.size)}</div>
           </div>
-          <button class="btn primary sm" onclick="window.requestFileDownload('${fileMeta.fileId}')">Download</button>
+          <button class="btn-file-dl" id="dlbtn_${fileMeta.fileId}" onclick="window.saveFileLocally('${fileMeta.fileId}', '${fileMeta.name}')">
+            ⬇ Download
+          </button>
         </div>
       `;
     }
 
+    html += `
+      <div class="wa-msg-meta">
+        <span>${timeStr}</span>
+        ${isMine ? '<span class="wa-ticks">✓✓</span>' : ""}
+      </div>
+    `;
+
+    bubble.innerHTML = html;
     chatStream.appendChild(bubble);
     chatStream.scrollTop = chatStream.scrollHeight;
   }
 
-  window.requestFileDownload = (fileId) => {
-    broadcastSignal({ type: "file_request_download", fileId });
-    showAlert("Requested file stream from room host...", false);
+  function updateFileBubbleWithBlob(fileId, blob, name) {
+    const dlBtn = document.getElementById(`dlbtn_${fileId}`);
+    if (dlBtn) {
+      dlBtn.textContent = "💾 Save File";
+      dlBtn.style.background = "#2563eb";
+    }
+
+    // Media preview if image or video
+    const fileCard = document.getElementById(`filecard_${fileId}`);
+    if (fileCard && blob.type.startsWith("image/")) {
+      const url = URL.createObjectURL(blob);
+      const img = document.createElement("img");
+      img.src = url;
+      img.style.maxWidth = "100%";
+      img.style.borderRadius = "6px";
+      img.style.marginTop = "6px";
+      fileCard.parentElement.appendChild(img);
+    }
+  }
+
+  // Guaranteed Safe Downloader
+  window.saveFileLocally = (fileId, fileName) => {
+    const blob = locallyStoredBlobs.get(fileId);
+    if (!blob) {
+      alert("This file is still downloading or buffering. Please wait a moment.");
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
-  function sendChatMessage() {
+  function sendTextMessage() {
     const text = chatInput.value.trim();
     if (!text) return;
 
-    const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    appendChatMessage(myName, text, true, null, id);
-    broadcastSignal({ type: "chat_message", text, id });
+    const id = `msg_${Date.now()}`;
+    appendMessageBubble(myProfile.name, myProfile.avatar, text, true, null, id);
+    publish({ type: "chat", text, id });
     chatInput.value = "";
   }
 
-  sendChatBtn.addEventListener("click", sendChatMessage);
+  sendMsgBtn.addEventListener("click", sendTextMessage);
   chatInput.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") sendChatMessage();
+    if (e.key === "Enter") sendTextMessage();
   });
 
-  // 10. Room Re-sync Without Exiting
-  refreshRoomBtn.addEventListener("click", () => {
-    refreshRoomBtn.classList.add("spinning");
-    showAlert("Refreshing room connections...", false);
-
-    // Send re-sync pulse to all peers
-    broadcastSignal({ type: "room_refresh_request" });
-
-    // Re-negotiate WebRTC with each peer
-    peers.forEach((p, pId) => {
-      renegotiatePeer(pId);
+  // Drag and drop handler
+  ["dragenter", "dragover"].forEach((eName) => {
+    window.addEventListener(eName, (e) => {
+      e.preventDefault();
+      dropOverlay.classList.remove("hidden");
     });
-
-    setTimeout(() => {
-      refreshRoomBtn.classList.remove("spinning");
-      showAlert(`Room #${currentPin} successfully re-synchronized!`, false);
-    }, 600);
   });
 
-  function renegotiatePeer(peerId) {
-    const p = peers.get(peerId);
-    if (p && p.pc) {
-      p.pc.close();
+  ["dragleave", "drop"].forEach((eName) => {
+    dropOverlay.addEventListener(eName, (e) => {
+      e.preventDefault();
+      dropOverlay.classList.add("hidden");
+    });
+  });
+
+  dropOverlay.addEventListener("drop", (e) => {
+    if (e.dataTransfer.files.length) {
+      Array.from(e.dataTransfer.files).forEach((f) => broadcastHeavyFile(f));
     }
-    initiateWebRTCConnection(peerId, true);
+  });
+
+  filePicker.addEventListener("change", (e) => {
+    if (e.target.files.length) {
+      Array.from(e.target.files).forEach((f) => broadcastHeavyFile(f));
+    }
+  });
+
+  // 5. Audio / Video Calling Engine (With Dual-Tab Safety Fallback)
+  async function acquireMedia(videoRequested = true) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ video: videoRequested, audio: true });
+    } catch (err) {
+      // Camera may be locked by another tab on the same PC: fall back to audio
+      console.warn("Camera locked or unavailable. Falling back to audio-only.");
+      return await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+    }
   }
 
-  // 11. Audio / Video Call & Session Recording
-  startCallBtn.addEventListener("click", async () => {
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localVideo.srcObject = localStream;
-      videoGrid.classList.remove("hidden");
-
-      startCallBtn.classList.add("hidden");
-      endCallBtn.classList.remove("hidden");
-      toggleMicBtn.classList.remove("hidden");
-      toggleCamBtn.classList.remove("hidden");
-
-      // Attach tracks to all connected WebRTC peer connections
-      peers.forEach((p) => {
-        if (p.pc) {
-          localStream.getTracks().forEach((track) => p.pc.addTrack(track, localStream));
-          renegotiatePeer(p.peerId);
-        }
-      });
-    } catch (e) {
-      showAlert(`Camera/Microphone error: ${e.message}`, true);
+  async function startCall(video = true) {
+    if (peers.size === 0) {
+      alert("Wait for at least one other device to enter this room before calling.");
+      return;
     }
-  });
 
-  endCallBtn.addEventListener("click", () => {
+    localStream = await acquireMedia(video);
+    localVideo.srcObject = localStream;
+    videoDock.classList.remove("hidden");
+
+    activeCallPeer = peers.keys().next().value;
+
+    publish({
+      type: "call_invite",
+      targetId: activeCallPeer,
+      callerName: myProfile.name,
+      callerAvatar: myProfile.avatar,
+      hasVideo: video,
+    });
+  }
+
+  callVideoBtn.addEventListener("click", () => startCall(true));
+  callAudioBtn.addEventListener("click", () => startCall(false));
+
+  function handleIncomingCallInvite(msg) {
+    playRingtone();
+    callCallerName.textContent = `${msg.callerName} is calling...`;
+    callCallerAvatar.textContent = msg.callerAvatar || "📞";
+    incomingCallModal.classList.remove("hidden");
+
+    btnAcceptCall.onclick = async () => {
+      stopRingtone();
+      incomingCallModal.classList.add("hidden");
+
+      localStream = await acquireMedia(msg.hasVideo);
+      localVideo.srcObject = localStream;
+      videoDock.classList.remove("hidden");
+
+      activeCallPeer = msg.senderId;
+      initiateWebRTCPeerConnection(msg.senderId, false);
+      publish({ type: "call_signal", targetId: msg.senderId, sub: "accepted" });
+    };
+
+    btnRejectCall.onclick = () => {
+      stopRingtone();
+      incomingCallModal.classList.add("hidden");
+      publish({ type: "call_signal", targetId: msg.senderId, sub: "rejected" });
+    };
+  }
+
+  function handleCallSignal(msg) {
+    if (msg.sub === "accepted") {
+      initiateWebRTCPeerConnection(msg.senderId, true);
+    } else if (msg.sub === "rejected") {
+      alert("Call was declined.");
+      endCallLocally();
+    } else if (msg.sub === "sdp_offer") {
+      handleSdpOffer(msg.senderId, msg.sdp);
+    } else if (msg.sub === "sdp_answer") {
+      handleSdpAnswer(msg.senderId, msg.sdp);
+    } else if (msg.sub === "ice") {
+      handleIceCandidate(msg.senderId, msg.candidate);
+    }
+  }
+
+  let pc = null;
+  async function initiateWebRTCPeerConnection(peerId, isOffer) {
+    pc = new RTCPeerConnection(rtcServers);
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        publish({ type: "call_signal", targetId: peerId, sub: "ice", candidate: e.candidate });
+      }
+    };
+
+    pc.ontrack = (e) => {
+      remoteVideo.srcObject = e.streams[0];
+    };
+
+    if (localStream) {
+      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+    }
+
+    if (isOffer) {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      publish({ type: "call_signal", targetId: peerId, sub: "sdp_offer", sdp: offer });
+    }
+  }
+
+  async function handleSdpOffer(senderId, sdp) {
+    if (!pc) await initiateWebRTCPeerConnection(senderId, false);
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    publish({ type: "call_signal", targetId: senderId, sub: "sdp_answer", sdp: answer });
+  }
+
+  async function handleSdpAnswer(senderId, sdp) {
+    if (pc) await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  }
+
+  async function handleIceCandidate(senderId, candidate) {
+    if (pc && candidate) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {}
+    }
+  }
+
+  function endCallLocally() {
+    stopRingtone();
+    incomingCallModal.classList.add("hidden");
     if (localStream) {
       localStream.getTracks().forEach((t) => t.stop());
       localStream = null;
     }
+    if (pc) {
+      pc.close();
+      pc = null;
+    }
+    videoDock.classList.add("hidden");
     localVideo.srcObject = null;
     remoteVideo.srcObject = null;
-    videoGrid.classList.add("hidden");
+  }
 
-    startCallBtn.classList.remove("hidden");
-    endCallBtn.classList.add("hidden");
-    toggleMicBtn.classList.add("hidden");
-    toggleCamBtn.classList.add("hidden");
+  btnHangup.addEventListener("click", () => {
+    if (activeCallPeer) publish({ type: "call_hangup", targetId: activeCallPeer });
+    endCallLocally();
   });
 
-  toggleMicBtn.addEventListener("click", () => {
+  btnMuteMic.addEventListener("click", () => {
     if (!localStream) return;
-    const track = localStream.getAudioTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      toggleMicBtn.textContent = track.enabled ? "🎤 Mute" : "🔇 Unmute";
+    const a = localStream.getAudioTracks()[0];
+    if (a) {
+      a.enabled = !a.enabled;
+      btnMuteMic.textContent = a.enabled ? "🎤" : "🔇";
     }
   });
 
-  toggleCamBtn.addEventListener("click", () => {
+  btnToggleCam.addEventListener("click", () => {
     if (!localStream) return;
-    const track = localStream.getVideoTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      toggleCamBtn.textContent = track.enabled ? "📷 Cam Off" : "📷 Cam On";
+    const v = localStream.getVideoTracks()[0];
+    if (v) {
+      v.enabled = !v.enabled;
+      btnToggleCam.textContent = v.enabled ? "📷" : "🚫";
     }
   });
 
-  recordCallBtn.addEventListener("click", async () => {
+  // Session Recording
+  recordSessionBtn.addEventListener("click", async () => {
     if (mediaRecorder && mediaRecorder.state === "recording") {
       mediaRecorder.stop();
-      recordCallBtn.textContent = "⏺ Record";
-      recordBanner.classList.add("hidden");
+      recordSessionBtn.style.color = "inherit";
       return;
     }
 
     try {
-      let streamToRecord = localStream;
-      if (!streamToRecord) {
-        streamToRecord = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      let stream = localStream;
+      if (!stream) {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       }
 
       recordedChunks = [];
-      mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: "video/webm" });
-
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunks.push(e.data);
       };
-
       mediaRecorder.onstop = () => {
         const blob = new Blob(recordedChunks, { type: "video/webm" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `Dhurta-Record-${Date.now()}.webm`;
+        a.download = `WhatsApp-Dhurta-Record-${Date.now()}.webm`;
         a.click();
-        showAlert("Session recording downloaded!", false);
       };
-
       mediaRecorder.start();
-      recordCallBtn.textContent = "⏹ Stop Recording";
-      recordBanner.classList.remove("hidden");
-    } catch (err) {
-      showAlert(`Record failed: ${err.message}`, true);
+      recordSessionBtn.style.color = "var(--wa-danger)";
+    } catch (e) {
+      alert("Recording canceled or unsupported.");
     }
   });
 
-  // 12. Controls & Initial Bootstrap
-  joinPinBtn.addEventListener("click", () => enterRoom(pinInput.value.trim()));
+  // 6. Navigation & QR Controls
+  enterPinBtn.addEventListener("click", () => enterRoom(pinInput.value.trim()));
   randomPinBtn.addEventListener("click", () => {
-    const r = Math.floor(1000 + Math.random() * 9000).toString();
-    enterRoom(r);
+    enterRoom(Math.floor(1000 + Math.random() * 9000).toString());
   });
 
-  openWindowBtn.addEventListener("click", () => {
-    const url = shareLinkInput.value.startsWith("http") ? shareLinkInput.value : window.location.href;
-    window.open(url, "_blank", "width=960,height=840");
+  newWindowBtn.addEventListener("click", () => {
+    window.open(shareLinkInput.value, "_blank", "width=1000,height=850");
   });
 
   copyLinkBtn.addEventListener("click", () => {
@@ -846,15 +773,18 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  toggleQrBtn.addEventListener("click", () => qrDrawer.classList.remove("hidden"));
-  closeQrBtn.addEventListener("click", () => qrDrawer.classList.add("hidden"));
+  showQrBtn.addEventListener("click", () => qrModal.classList.remove("hidden"));
+  btnCloseQr.addEventListener("click", () => qrModal.classList.add("hidden"));
 
-  // Initial Load from URL query (?pin=XXXX)
-  const queryPin = new URLSearchParams(window.location.search).get("pin");
-  if (queryPin && /^\d{4}$/.test(queryPin)) {
-    enterRoom(queryPin);
+  refreshRoomBtn.addEventListener("click", () => {
+    enterRoom(currentPin);
+  });
+
+  // Bootstrap with URL query or random 4-digit room
+  const urlPin = new URLSearchParams(window.location.search).get("pin");
+  if (urlPin && /^\d{4}$/.test(urlPin)) {
+    enterRoom(urlPin);
   } else {
-    const defaultPin = Math.floor(1000 + Math.random() * 9000).toString();
-    enterRoom(defaultPin);
+    enterRoom(Math.floor(1000 + Math.random() * 9000).toString());
   }
 });
