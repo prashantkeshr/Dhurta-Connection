@@ -3,231 +3,176 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dhurta Connection | Professional P2P Room Sync</title>
-
-  <!-- External Libraries: MQTT Bus + PeerJS WebRTC + QR Generator -->
-  <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <title>Dhurta Connection | High-Speed Heavy Transfer</title>
   
+  <!-- MQTT for Signaling + QR Code Generator -->
+  <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app-layout">
-    
-    <!-- Top Global Bar (Visible in Out-Space & In-Space) -->
-    <header class="global-header">
-      <div class="brand-group">
-        <div class="brand-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="var(--accent)"/>
-          </svg>
-        </div>
-        <div class="brand-info">
-          <h1>DHURTA <span>CONNECTION</span></h1>
-          <span class="brand-sub">Enterprise Real-Time Sync & Media Hub</span>
-        </div>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="top-nav">
+      <div class="brand">⚡ Dhurta <span>Connection</span> <span class="badge-tag">P2P Core</span></div>
+      
+      <div class="user-chip">
+        <span class="avatar-dot"></span>
+        <span id="my-assigned-name">Generating...</span>
       </div>
 
-      <div class="header-right">
-        <div class="alias-tag">
-          <span class="alias-icon">👤</span>
-          <span id="user-alias">Assigning ID...</span>
-        </div>
-        <div id="room-status-badge" class="status-badge offline">
-          <span class="status-dot"></span>
-          <span id="room-status-text">Out-Space (No Room)</span>
-        </div>
-        <button id="btn-self-test" class="btn sm secondary">🧪 Diagnostics</button>
+      <div class="nav-actions">
+        <button id="btn-refresh-room" class="btn sm secondary" title="Re-sync room connections without reloading">🔄 Refresh Room</button>
+        <button id="btn-open-window" class="btn sm secondary">🗗 New Window</button>
+        <div id="connection-pill" class="status-pill offline">Connecting...</div>
       </div>
     </header>
 
-    <!-- Global Error & Info Banner -->
+    <!-- On-screen Notification Banner -->
     <div id="alert-banner" class="alert-banner hidden">
-      <div class="alert-left">
-        <span id="alert-icon" class="alert-icon">⚠️</span>
-        <span id="alert-message">System notification</span>
-      </div>
-      <button id="btn-dismiss-alert" class="btn-icon">&times;</button>
+      <span id="alert-text"></span>
+      <button id="btn-close-alert" class="btn-close">&times;</button>
     </div>
 
-    <!-- Diagnostics Panel (Out-Space & In-Space) -->
-    <div id="diag-modal" class="diag-modal hidden">
-      <div class="diag-header">
-        <h3>System & Network Diagnostics</h3>
-        <button id="btn-close-diag" class="btn-icon">&times;</button>
-      </div>
-      <div id="diag-results" class="diag-body">
-        <p>Running checks...</p>
-      </div>
-    </div>
-
-    <!-- ============================================== -->
-    <!-- OUT-SPACE: Room Creation, PIN Entry & QR Code  -->
-    <!-- ============================================== -->
-    <section id="out-space" class="out-space">
-      <div class="out-space-grid">
-        <!-- Room Entry Card -->
-        <div class="card out-card">
-          <div class="card-title">
-            <h2>Enter or Create Room</h2>
-            <p>Type any 4-digit code to connect devices across any network.</p>
-          </div>
-
-          <div class="pin-entry-box">
-            <input type="text" id="pin-input" maxlength="4" placeholder="4829" />
-            <button id="btn-enter-room" class="btn primary">Enter Room Workspace</button>
-            <button id="btn-random-pin" class="btn secondary">Generate PIN</button>
-          </div>
-
-          <div class="room-direct-link">
-            <label>Direct Join Link:</label>
-            <div class="copy-input">
-              <input type="text" id="direct-link-input" readonly value="Enter PIN to generate link" />
-              <button id="btn-copy-link" class="btn secondary sm">Copy</button>
-              <button id="btn-open-window" class="btn secondary sm">🗗 Open in New Window</button>
-            </div>
-          </div>
+    <!-- Room Control Dock -->
+    <section class="card room-dock">
+      <div class="room-pin-zone">
+        <label for="pin-input">4-Digit Room PIN:</label>
+        <div class="pin-field-wrap">
+          <input type="text" id="pin-input" maxlength="4" placeholder="4829" />
+          <button id="btn-join-pin" class="btn primary">Enter Room</button>
+          <button id="btn-random-pin" class="btn secondary">Random PIN</button>
         </div>
+      </div>
 
-        <!-- Pairing QR Code Card -->
-        <div class="card out-card qr-card-box">
-          <div class="card-title">
-            <h2>Instant Device Pairing</h2>
-            <p>Scan with any mobile camera to join the room instantly.</p>
-          </div>
-          <div class="qr-canvas-wrapper">
-            <div id="qrcode"></div>
-          </div>
-          <div class="qr-instructions">
-            <span>● Enter the 4-digit PIN on other devices or scan the QR code.</span>
-          </div>
+      <div class="room-link-zone">
+        <span>Invite Link:</span>
+        <div class="link-field-wrap">
+          <input type="text" id="share-link" readonly value="Connecting..." />
+          <button id="btn-copy-link" class="btn secondary sm">Copy</button>
+          <button id="btn-toggle-qr" class="btn secondary sm">Show QR</button>
         </div>
       </div>
     </section>
 
-    <!-- ============================================== -->
-    <!-- IN-SPACE: Active Room Workspace               -->
-    <!-- ============================================== -->
-    <section id="in-space" class="in-space hidden">
-      
-      <!-- In-Space Top Control Bar -->
-      <div class="in-space-bar card">
-        <div class="in-room-info">
-          <span class="room-pill">Active Room: <strong id="active-pin-display">----</strong></span>
-          <span class="device-pill">👥 Connected Devices: <strong id="active-device-count">1</strong></span>
+    <!-- QR Code Popup Drawer -->
+    <div id="qr-drawer" class="qr-drawer hidden">
+      <div class="qr-drawer-content card">
+        <div class="qr-header">
+          <h4>Scan to Join Room <span id="qr-room-label"></span></h4>
+          <button id="btn-close-qr" class="btn-close">&times;</button>
         </div>
-        <div class="in-space-actions">
-          <button id="btn-leave-room" class="btn danger sm">Leave Room (Out-Space)</button>
+        <div class="qr-wrapper">
+          <div id="qrcode"></div>
         </div>
+        <p class="qr-note">Scan with your phone to instantly enter this room with full history.</p>
       </div>
+    </div>
 
-      <div class="in-space-grid">
-        
-        <!-- Left Sidebar: Devices & Media Tools -->
-        <aside class="in-sidebar">
-          
-          <!-- Connected Device Roster -->
-          <div class="card device-roster-card">
-            <h3>Connected Devices Roster</h3>
-            <div id="device-roster" class="device-roster">
-              <!-- Populated dynamically -->
+    <!-- Main Workspace -->
+    <main class="main-layout">
+      <!-- Left Column: Devices & Call Manager -->
+      <aside class="sidebar">
+        <!-- Connected Devices Roster -->
+        <div class="card roster-card">
+          <div class="card-header">
+            <h3>Connected Devices (<span id="device-count">1</span>)</h3>
+            <span class="indicator-live">Live</span>
+          </div>
+          <div id="devices-roster" class="devices-roster"></div>
+        </div>
+
+        <!-- Audio/Video Calling Box -->
+        <div class="card call-card">
+          <div class="card-header">
+            <h3>Call & Stream</h3>
+            <button id="btn-record-call" class="btn warning sm" title="Record screen or call session">⏺ Record</button>
+          </div>
+          <div class="call-actions">
+            <button id="btn-start-call" class="btn primary sm full-width">📞 Start Video Call</button>
+            <button id="btn-end-call" class="btn danger sm hidden">End Call</button>
+            <button id="btn-toggle-mic" class="btn secondary sm hidden">🎤 Mute</button>
+            <button id="btn-toggle-cam" class="btn secondary sm hidden">📷 Cam Off</button>
+          </div>
+
+          <div id="video-grid" class="video-grid hidden">
+            <div class="video-pod">
+              <span class="video-tag">You</span>
+              <video id="local-video" autoplay playsinline muted></video>
+            </div>
+            <div class="video-pod">
+              <span class="video-tag" id="remote-label">Remote</span>
+              <video id="remote-video" autoplay playsinline></video>
+            </div>
+          </div>
+          <div id="record-banner" class="record-banner hidden">● Recording Active (Click Record again to save .webm)</div>
+        </div>
+      </aside>
+
+      <!-- Center / Right Column: Heavy File Transfer Engine & Chat -->
+      <section class="content-area">
+        <!-- Heavy File Engine -->
+        <div class="card file-engine-card">
+          <div class="card-header">
+            <h3>Heavy P2P File Transfer (High Speed)</h3>
+            <div class="transfer-stats">
+              <span id="speed-meter" class="stat-badge">0 MB/s</span>
+              <span id="channel-type-badge" class="stat-badge p2p">Direct P2P Ready</span>
             </div>
           </div>
 
-          <!-- Video / Audio Call & Recorder -->
-          <div class="card media-call-card">
-            <div class="card-header-flex">
-              <h3>Live Audio/Video & Recorder</h3>
-              <div class="call-btn-group">
-                <button id="btn-start-call" class="btn primary sm">📞 Call</button>
-                <button id="btn-end-call" class="btn danger sm hidden">End</button>
-                <button id="btn-record-session" class="btn warning sm">⏺ Record</button>
-              </div>
-            </div>
-
-            <!-- Video Windows -->
-            <div id="call-video-grid" class="call-video-grid hidden">
-              <div class="video-frame">
-                <span class="video-badge">Local (You)</span>
-                <video id="local-video" autoplay playsinline muted></video>
-              </div>
-              <div class="video-frame">
-                <span class="video-badge" id="remote-video-badge">Remote Peer</span>
-                <video id="remote-video" autoplay playsinline></video>
-              </div>
-            </div>
-            
-            <div id="record-status-bar" class="record-status-bar hidden">
-              ● Recording session... Click "Stop Record" to download file.
+          <!-- Drag & Drop Zone -->
+          <div id="drop-zone" class="drop-zone">
+            <input type="file" id="file-input" multiple />
+            <div class="drop-content">
+              <div class="drop-icon">🚀</div>
+              <p><strong>Drag & drop heavy files here</strong> or <span class="highlight">browse</span></p>
+              <span class="drop-hint">Supports Large Videos, ZIPs, Folders, ISOs (Direct Memory-Managed Stream)</span>
             </div>
           </div>
 
-        </aside>
+          <!-- Staged files -->
+          <div id="staged-files" class="staged-files"></div>
 
-        <!-- Right Main: File Stream & Live Room Chat -->
-        <main class="in-main">
-          
-          <!-- File Transfer Drop Zone -->
-          <div class="card file-transfer-card">
-            <div class="card-header-flex">
-              <h3>Direct File Stream (Images, Video, Audio, Docs)</h3>
-              <span id="file-status-indicator" class="badge-neutral">Ready</span>
+          <!-- Transfer Progress Monitor -->
+          <div id="progress-monitor" class="progress-monitor hidden">
+            <div class="monitor-header">
+              <span id="transfer-filename">Uploading...</span>
+              <span id="transfer-percent">0%</span>
             </div>
-
-            <div id="drop-area" class="drop-area">
-              <input type="file" id="file-input-el" multiple />
-              <div class="drop-ui">
-                <div class="upload-icon">📁</div>
-                <p><strong>Drag & drop files here</strong> or <span class="highlight">browse</span></p>
-                <span class="drop-sub">Synced across all devices in Room</span>
-              </div>
+            <div class="progress-bar-bg">
+              <div id="progress-bar-fill" class="progress-bar-fill"></div>
             </div>
-
-            <!-- Staged File Queue -->
-            <div id="staged-queue" class="staged-queue"></div>
-
-            <!-- Transfer Progress -->
-            <div id="transfer-progress-box" class="transfer-progress-box hidden">
-              <div class="progress-details">
-                <span id="progress-file-name">Transferring...</span>
-                <span id="progress-percentage">0%</span>
-              </div>
-              <div class="progress-track">
-                <div id="progress-bar-fill" class="progress-bar-fill"></div>
-              </div>
-            </div>
-
-            <button id="btn-dispatch-files" class="btn primary full-width">Send Files to Room</button>
-          </div>
-
-          <!-- Room Chat & Synced Media Gallery -->
-          <div class="card chat-media-card">
-            <h3>Room Chat & Shared Media Stream</h3>
-            <div id="chat-stream" class="chat-stream">
-              <div class="system-bubble">Room connected. All devices in this room receive messages & media in real time.</div>
-            </div>
-
-            <div class="chat-control-bar">
-              <input type="text" id="chat-input-box" placeholder="Type a message to the room and press Enter..." />
-              <button id="btn-send-message" class="btn primary">Send</button>
+            <div class="monitor-footer">
+              <span id="transfer-bytes-info">0 MB / 0 MB</span>
+              <span id="transfer-eta">Calculating...</span>
             </div>
           </div>
 
-        </main>
-      </div>
+          <!-- Actions -->
+          <div class="file-engine-actions">
+            <button id="btn-send-files" class="btn primary full-width">Send Staged Files to Room</button>
+          </div>
+        </div>
 
-    </section>
+        <!-- Chat & Shared History Feed -->
+        <div class="card chat-card">
+          <div class="card-header">
+            <h3>Room Chat & Shared Library</h3>
+            <span class="subtext">History automatically syncs with newcomers</span>
+          </div>
 
-    <!-- Out-Space & In-Space Debug Console Log -->
-    <footer class="card system-log-footer">
-      <div class="log-top">
-        <h4>System Activity Log & Diagnostics</h4>
-        <button id="btn-clear-console" class="btn sm secondary">Clear Logs</button>
-      </div>
-      <div id="console-output" class="console-output"></div>
-    </footer>
+          <div id="chat-stream" class="chat-stream">
+            <div class="chat-system-entry">Room started. Files and messages sent will remain available as long as you stay connected.</div>
+          </div>
 
+          <div class="chat-input-bar">
+            <input type="text" id="chat-input" placeholder="Type a message or paste a link..." />
+            <button id="btn-send-chat" class="btn primary">Send</button>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
   <script src="script.js"></script>
